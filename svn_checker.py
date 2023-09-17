@@ -6,21 +6,28 @@ import subprocess
 import openpyxl
 import difflib
 import errno
-from pathlib import Path
+import time
+import datetime
+import shutil
+from pathlib  import Path
+from operator import itemgetter
+from operator import attrgetter
 
 
-g_stop_on_copy = 0
-g_full_path    = 0
-g_log_limit    = 0
-g_kazoe_path   = ""
-g_revision1    = ""
-g_revision2    = ""
-g_path1        = ""
-g_path2        = ""
-g_path_logs    = []
-g_repo_info    = None
-g_out_path     = "out"
-g_target_paths = []
+g_stop_on_copy      = 0
+g_full_path         = 0
+g_log_limit         = 0
+g_kazoe_path        = ""
+g_revision1         = ""
+g_revision2         = ""
+g_path1             = ""
+g_path2             = ""
+g_path_logs         = []
+g_repo_info         = None
+g_out_path          = "out"
+g_target_paths      = []
+g_log_file_name     = ""
+g_default_log       = 1
 
 re_log_line    = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
 re_change_line = re.compile(r"^\s+([MADR])\s(.+)")
@@ -69,10 +76,55 @@ class cRepoInfo:
 
 
 #/*****************************************************************************/
+#/* ログファイル設定                                                          */
+#/*****************************************************************************/
+def log_settings():
+    global g_log_file_name
+    global g_out_path
+    global g_default_log
+
+
+    make_directory(g_out_path)
+    log_path = ""
+
+#   print("log_settings")
+    if (g_log_file_name != ""):
+        log_path = g_out_path + "\\" + g_log_file_name
+    elif (g_default_log == 1):
+        now = datetime.datetime.now()
+        formatted_time = now.strftime("%Y%m%d_%H%M%S")
+        log_path = g_out_path + "\\svn_checker_" + formatted_time + ".log";
+
+    print ("log_path : %s" % log_path)
+
+    if (log_path != ""):
+       log_file = open(log_path, "a")
+       sys.stdout = log_file
+
+    now = datetime.datetime.now()
+    print("start checking : " + str(now))
+
+    return
+
+#/*****************************************************************************/
 #/* 外部コマンド実行                                                          */
 #/*****************************************************************************/
-def cmd_execute(cmd_text):
-    result = subprocess.run(cmd_text, capture_output=True, text=True)
+def cmd_execute(cmd_text, out_file, in_file):
+    if (out_file == ""):
+        if (in_file == ""):
+            result = subprocess.run(cmd_text, capture_output=True, text=True)
+        else:
+            with open(in_file, "r") as infile:
+                result = subprocess.run(cmd_text, capture_output=True, text=True, stdin=infile)
+    else:
+        if (in_file == ""):
+            with open(out_file, "w") as outfile:
+                result = subprocess.run(cmd_text, stdout=outfile)
+        else:
+            with open(out_file, "w") as outfile:
+                with open(in_file, "r") as infile:
+                    result = subprocess.run(cmd_text, stdout=outfile, stdin=infile)
+
 #   print(result.stdout)
     return result.stdout
 
@@ -83,6 +135,20 @@ def cmd_execute(cmd_text):
 def make_directory(path):
     try:
         os.makedirs(path)
+    except OSError as exception:
+        if exception.errno != errno.EEXIST:
+            raise
+    return
+
+#/*****************************************************************************/
+#/* ディレクトリ作成                                                          */
+#/*****************************************************************************/
+def force_copy_directory(src_path, dst_path):
+    if os.path.exists(dst_path):
+        shutil.rmtree(dst_path)
+
+    try:
+        shutil.copytree(src_path, dst_path)
     except OSError as exception:
         if exception.errno != errno.EEXIST:
             raise
@@ -203,7 +269,7 @@ def check_log(target_path, revision, limit):
     path_log.option = option
 
     print(cmd_text)
-    lines = cmd_execute(cmd_text).split("\n")
+    lines = cmd_execute(cmd_text, "", "").split("\n")
 
     commit_log = None
     log_sequence = 0
@@ -275,8 +341,9 @@ def check_log(target_path, revision, limit):
                 log_sequence = 0
             pass
 
-    #/* 最後にターゲットpathの重複を削除して、登録する */
+    #/* 最後にターゲットpathの重複を削除して、ログをRevisionの昇順でソートして登録する */
     path_log.targets = set(path_log.targets)
+    path_log.logs.sort(key=attrgetter('revision'))
     g_path_logs.append(path_log)
     return
 
@@ -298,6 +365,7 @@ def check_path_log():
         check_log(g_path1, g_revision1, g_log_limit)
     else:
         check_log(g_path1)
+
     return
 
 
@@ -309,7 +377,7 @@ def check_repo_info():
     global g_repo_info
 
     g_repo_info = cRepoInfo()
-    lines = cmd_execute("svn info " + g_path1).split("\n")
+    lines = cmd_execute("svn info " + g_path1, "", "").split("\n")
     for line in lines:
 #       print(line)
         if (result := re.match(r"Path: ([^\s]+)", line)):
@@ -335,30 +403,74 @@ def check_repo_info():
 #/*****************************************************************************/
 #/* ログ内のターゲットファイル出力                                            */
 #/*****************************************************************************/
-def output_log_files(path_log, commit_log):
+def output_log_text(target_path, commit_log):
+    file_path = target_path + "/commit_log.txt"
+    with open(file_path, "w") as outfile:
+        print("Revision : " + str(commit_log.revision),  file = outfile)
+        print("Author   : " + commit_log.author,         file = outfile)
+        print("Date     : %04d/%02d/%02d" % (commit_log.year, commit_log.month, commit_log.day),     file = outfile)
+        print("Time     : %02d:%02d:%02d" % (commit_log.hour, commit_log.minute, commit_log.second), file = outfile)
+        print("", file = outfile)
+        for comment in commit_log.comments:
+            print("Comment  : " + comment, file = outfile)
+
+        print("", file = outfile)
+
+        for change in commit_log.changes:
+            print("Files    : %s   %s" % (change.attribute, change.path), file = outfile)
+
+        print("", file = outfile)
+
+    return
+
+
+
+#/*****************************************************************************/
+#/* ログ内のターゲットファイル出力                                            */
+#/*****************************************************************************/
+def output_log_files(path_log, commit_log, pre_revision):
     global g_repo_info
     global g_full_path
     global g_out_path
 
     rev_path = g_out_path + "/rev_" + str(commit_log.revision)
-    cmd_base = "svn export -r " + str(commit_log.revision) + " "
-    make_directory(rev_path)
+    print("output_log_files for rev:%d, pre_rev: %d" % (commit_log.revision, pre_revision))
 
     out_path = rev_path
-    for target in path_log.targets:
-        if (is_path_in_target(target)):
-#           print("out for %d : %s" % (commit_log.revision, target))
-            if (g_full_path):
-                out_path = rev_path + os.path.dirname(target)
-                export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
-            else:
-                out_path = rev_path + os.path.dirname(target).replace(g_repo_info.relative, "")
-                export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
-#           print("create path : %s" % (out_path))
-            make_directory(out_path)
-#           print("export : %s" % (export_cmd))
-            lines = cmd_execute(export_cmd)
+    if (pre_revision == 0):
+        cmd_base = "svn export -r " + str(commit_log.revision) + " "
+        make_directory(rev_path)
+        for target in path_log.targets:
+            if (is_path_in_target(target)):
+#               print("out for %d : %s" % (commit_log.revision, target))
+                if (g_full_path):
+                    out_path = rev_path + os.path.dirname(target)
+                    export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
+                else:
+                    out_path = rev_path + os.path.dirname(target).replace(g_repo_info.relative, "")
+                    export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
+#               print("create path : %s" % (out_path))
+                make_directory(out_path)
+#               print("export : %s" % (export_cmd))
+                lines = cmd_execute(export_cmd, "", "")
+    else:
+        #/* 2回目以降のRevisionに対しては、svn diffによるPatchを取得して、Patchを当てていくことで高速化する */
+        pre_path = g_out_path + "/rev_" + str(pre_revision)
+        force_copy_directory(pre_path, out_path)
+        out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
+        diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
+        print(diff_cmd)
+        lines = cmd_execute(diff_cmd, out_diff, "")
+        print(lines)
+        if (g_full_path):
+            patch_cmd = "patch -d " + out_path + g_repo_info.relative + " -p0"
+        else:
+            patch_cmd = "patch -d " + out_path + " -p0"
+        print(patch_cmd)
+        lines = cmd_execute(patch_cmd, "", out_diff)
+        os.remove(out_diff)
 
+    output_log_text(rev_path, commit_log)
     return
 
 
@@ -371,8 +483,8 @@ def output_path_files():
     global g_out_path
     global g_full_path
 
+    pre_revision = 0
     make_directory(g_out_path)
-
     for path_log in g_path_logs:
         for target in path_log.targets:
             print("target : %s" % target)
@@ -383,7 +495,8 @@ def output_path_files():
                 if (changed.external == 0):
 #                   print("hit on rev %d" % log.revision)
                     if (is_path_in_target(changed.path)):
-                        output_log_files(path_log, log)
+                        output_log_files(path_log, log, pre_revision)
+                        pre_revision = log.revision
                         break
 
     return
@@ -393,10 +506,21 @@ def output_path_files():
 #/* メイン関数                                                                */
 #/*****************************************************************************/
 def main():
+    start_time = time.perf_counter()
+
     check_command_line_option()
+    log_settings()
     check_repo_info()
     check_path_log()
     output_path_files()
+
+    end_time = time.perf_counter()
+    now = datetime.datetime.now()
+    print("end checking : " + str(now))
+    second = int(end_time - start_time)
+    minute = second / 60
+    second = second % 60
+    print("  %dmin %dsec" % (minute, second))
     return
 
 
