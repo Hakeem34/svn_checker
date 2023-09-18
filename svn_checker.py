@@ -17,7 +17,6 @@ from operator import attrgetter
 g_stop_on_copy      = 0
 g_full_path         = 0
 g_log_limit         = 0
-g_kazoe_path        = ""
 g_revision1         = ""
 g_revision2         = ""
 g_path1             = ""
@@ -28,6 +27,10 @@ g_out_path          = "out"
 g_target_paths      = []
 g_log_file_name     = ""
 g_default_log       = 1
+
+#/* かぞえチャオ関連 */
+g_kazoe_path        = r"..\kazoeciao"
+g_out_cas_file      = 1
 
 re_log_line    = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
 re_change_line = re.compile(r"^\s+([MADR])\s(.+)")
@@ -401,7 +404,7 @@ def check_repo_info():
 
 
 #/*****************************************************************************/
-#/* ログ内のターゲットファイル出力                                            */
+#/* コミットログ内容を出力                                                    */
 #/*****************************************************************************/
 def output_log_text(target_path, commit_log):
     file_path = target_path + "/commit_log.txt"
@@ -424,6 +427,52 @@ def output_log_text(target_path, commit_log):
     return
 
 
+#/*****************************************************************************/
+#/* かぞえチャオ出力ファイルの削除                                            */
+#/*****************************************************************************/
+def clean_ciao_rslt(target_path):
+    files = os.listdir(target_path)
+
+    for filename in files:
+        if (os.path.isfile(target_path + "\\" + filename)):
+            if (result := re.match(r"^ciao_rslt[0-9]+_[0-9]+.csv",filename)):
+                print("remove ciao rslt file : %s" % (target_path + "\\" + filename))
+                os.remove(target_path + "\\" + filename)
+
+    return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオ自動実行ファイル（*.cas）作成                                 */
+#/*****************************************************************************/
+def output_cas_text(target_path, before, after):
+    global g_out_cas_file
+
+    if (g_out_cas_file != 0):
+        target_path = os.getcwd() + "\\" + target_path.replace("/", "\\")
+        file_path = target_path + "/diff_kazoe.cas"
+        with open(file_path, "w") as outfile:
+            after_path  = os.getcwd() + "\\" + after.replace("/", "\\")
+            before_path = os.getcwd() + "\\" + before.replace("/", "\\")
+            print(r"[AFTPATH]", file = outfile)
+            print(after_path,   file = outfile)
+            print(r"[BFRPATH]", file = outfile)
+            print(before_path,  file = outfile)
+            print(r"[EXEMODE]", file = outfile)
+            print(r"1",  file = outfile)
+            print(r"[RSLMODE]", file = outfile)
+            print(r"0",  file = outfile)
+            print(r"[RSLPATH]", file = outfile)
+            print(target_path,  file = outfile)
+            outfile.close()
+            clean_ciao_rslt(target_path)
+
+            kazoe_cmd = g_kazoe_path + "\\" + "kazoeciao.exe /a" + file_path
+            print(kazoe_cmd)
+            lines = cmd_execute(kazoe_cmd, "", "")
+
+    return
+
 
 #/*****************************************************************************/
 #/* ログ内のターゲットファイル出力                                            */
@@ -436,18 +485,19 @@ def output_log_files(path_log, commit_log, pre_revision):
     rev_path = g_out_path + "/rev_" + str(commit_log.revision)
     print("output_log_files for rev:%d, pre_rev: %d" % (commit_log.revision, pre_revision))
 
+    export_path = rev_path + "/export"
     out_path = rev_path
     if (pre_revision == 0):
         cmd_base = "svn export -r " + str(commit_log.revision) + " "
-        make_directory(rev_path)
+        make_directory(export_path)
         for target in path_log.targets:
             if (is_path_in_target(target)):
 #               print("out for %d : %s" % (commit_log.revision, target))
                 if (g_full_path):
-                    out_path = rev_path + os.path.dirname(target)
+                    out_path = export_path + os.path.dirname(target)
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
                 else:
-                    out_path = rev_path + os.path.dirname(target).replace(g_repo_info.relative, "")
+                    out_path = export_path + os.path.dirname(target).replace(g_repo_info.relative, "")
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
 #               print("create path : %s" % (out_path))
                 make_directory(out_path)
@@ -456,19 +506,20 @@ def output_log_files(path_log, commit_log, pre_revision):
     else:
         #/* 2回目以降のRevisionに対しては、svn diffによるPatchを取得して、Patchを当てていくことで高速化する */
         pre_path = g_out_path + "/rev_" + str(pre_revision)
-        force_copy_directory(pre_path, out_path)
+        force_copy_directory(pre_path, rev_path)
         out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
         diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
         print(diff_cmd)
         lines = cmd_execute(diff_cmd, out_diff, "")
         print(lines)
         if (g_full_path):
-            patch_cmd = "patch -d " + out_path + g_repo_info.relative + " -p0"
+            patch_cmd = "patch -d " + export_path + g_repo_info.relative + " -p0"
         else:
-            patch_cmd = "patch -d " + out_path + " -p0"
+            patch_cmd = "patch -d " + export_path + " -p0"
         print(patch_cmd)
         lines = cmd_execute(patch_cmd, "", out_diff)
         os.remove(out_diff)
+        output_cas_text(rev_path, pre_path + "/export", export_path)
 
     output_log_text(rev_path, commit_log)
     return
