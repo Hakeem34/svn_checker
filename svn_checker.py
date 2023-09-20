@@ -27,13 +27,14 @@ g_out_path          = "out"
 g_target_paths      = []
 g_log_file_name     = ""
 g_default_log       = 1
+g_patch_mode        = 0
 
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
 g_out_cas_file      = 1
 
 re_log_line    = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
-re_change_line = re.compile(r"^\s+([MADR])\s(.+)")
+re_change_line = re.compile(r"^\s+([MADR])\s([^\s]+)")
 re_change_file = re.compile(r"\/([^\/]+)$")
 
 class cChangeFile:
@@ -70,11 +71,12 @@ class cPathLog:
 
 class cRepoInfo:
     def __init__(self):
-        self.path      = ""
-        self.url       = ""
-        self.relative  = ""
-        self.root      = ""
-        self.node_kind = ""
+        self.path         = ""
+        self.url          = ""
+        self.relative     = ""
+        self.relative_dir = ""
+        self.root         = ""
+        self.node_kind    = ""
         return
 
 
@@ -399,6 +401,11 @@ def check_repo_info():
         exit(-1)
 
     print("Path : %s, URL : %s, Root : %s, Relative : %s, Kind : %s" % (g_repo_info.path, g_repo_info.url, g_repo_info.root, g_repo_info.relative, g_repo_info.node_kind))
+    if (g_repo_info.node_kind == "file"):
+        g_repo_info.relative_dir = os.path.dirname(g_repo_info.relative)
+        print("  Relative Directory : %s" % (g_repo_info.relative_dir))
+    else:
+        g_repo_info.relative_dir = g_repo_info.relative
     return
 
 
@@ -481,13 +488,15 @@ def output_log_files(path_log, commit_log, pre_revision):
     global g_repo_info
     global g_full_path
     global g_out_path
+    global g_patch_mode
 
     rev_path = g_out_path + "/rev_" + str(commit_log.revision)
     print("output_log_files for rev:%d, pre_rev: %d" % (commit_log.revision, pre_revision))
 
     export_path = rev_path + "/export"
     out_path = rev_path
-    if (pre_revision == 0):
+    pre_path = g_out_path + "/rev_" + str(pre_revision)
+    if ((pre_revision == 0) or (g_patch_mode == 0)):
         cmd_base = "svn export -r " + str(commit_log.revision) + " "
         make_directory(export_path)
         for target in path_log.targets:
@@ -497,15 +506,14 @@ def output_log_files(path_log, commit_log, pre_revision):
                     out_path = export_path + os.path.dirname(target)
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
                 else:
-                    out_path = export_path + os.path.dirname(target).replace(g_repo_info.relative, "")
+                    out_path = export_path + os.path.dirname(target).replace(g_repo_info.relative_dir, "")
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
-#               print("create path : %s" % (out_path))
+                print("create path : %s" % (out_path))
                 make_directory(out_path)
-#               print("export : %s" % (export_cmd))
+                print("export : %s" % (export_cmd))
                 lines = cmd_execute(export_cmd, "", "")
     else:
         #/* 2回目以降のRevisionに対しては、svn diffによるPatchを取得して、Patchを当てていくことで高速化する */
-        pre_path = g_out_path + "/rev_" + str(pre_revision)
         force_copy_directory(pre_path, rev_path)
         out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
         diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
@@ -513,12 +521,14 @@ def output_log_files(path_log, commit_log, pre_revision):
         lines = cmd_execute(diff_cmd, out_diff, "")
         print(lines)
         if (g_full_path):
-            patch_cmd = "patch -d " + export_path + g_repo_info.relative + " -p0"
+            patch_cmd = "patch -d " + export_path + g_repo_info.relative_dir + " -p0"
         else:
             patch_cmd = "patch -d " + export_path + " -p0"
         print(patch_cmd)
         lines = cmd_execute(patch_cmd, "", out_diff)
         os.remove(out_diff)
+
+    if (pre_revision != 0):
         output_cas_text(rev_path, pre_path + "/export", export_path)
 
     output_log_text(rev_path, commit_log)
