@@ -32,11 +32,21 @@ g_patch_mode        = 0
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
 g_out_cas_file      = 1
+g_kazoe_rslts       = []
+g_kazoe_only        = 0
 
-re_log_line    = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
-re_change_line = re.compile(r"^\s+([MADR])\s([^\s]+)")
-re_change_file = re.compile(r"\/([^\/]+)$")
+re_log_line            = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
+re_change_line         = re.compile(r"^\s+([MADR])\s([^\s]+)")
+re_change_file         = re.compile(r"\/([^\/]+)$")
+re_kazoe_module        = re.compile(r"\"([^\"]+)\",\"([^\"]+)\",\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
+re_kazoe_single_module = re.compile(r"\"([^\"]+)\",\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9\.]+)")
+re_kazoe_total         = re.compile(r"全ステップ数,\s*,\s*,\s*,([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
+re_kazoe_single_total  = re.compile(r"全ステップ数,\s*,\s*,([0-9]+),([0-9]+),([0-9\.]+)")
 
+
+#/*****************************************************************************/
+#/* コミットログの中のファイル単位の情報の保持クラス                          */
+#/*****************************************************************************/
 class cChangeFile:
     def __init__(self):
         self.attribute = ""
@@ -45,6 +55,10 @@ class cChangeFile:
         self.external  = 0
         return
 
+
+#/*****************************************************************************/
+#/* svn のコミットログごとに得られる情報を保持するクラス                      */
+#/*****************************************************************************/
 class cCommitLog:
     def __init__(self):
         self.revision = 0
@@ -61,6 +75,10 @@ class cCommitLog:
         self.changes  = []
         return
 
+
+#/*****************************************************************************/
+#/* svn logで得られる情報の保持クラス                                         */
+#/*****************************************************************************/
 class cPathLog:
     def __init__(self):
         self.path     = ""
@@ -69,6 +87,10 @@ class cPathLog:
         self.targets  = []
         return
 
+
+#/*****************************************************************************/
+#/* svn infoで得られる情報の保持クラス                                        */
+#/*****************************************************************************/
 class cRepoInfo:
     def __init__(self):
         self.path         = ""
@@ -77,6 +99,116 @@ class cRepoInfo:
         self.relative_dir = ""
         self.root         = ""
         self.node_kind    = ""
+        return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオのステップ数情報保持クラス                                    */
+#/*****************************************************************************/
+class cKazoeSteps:
+    def __init__(self):
+        self.real_steps   = 0                  #/* 実ステップ数          */
+        self.new_steps    = 0                  #/* 新規ステップ          */
+        self.base_steps   = 0                  #/* 流用元ステップ        */
+        self.mod_steps    = 0                  #/* 変更ステップ          */
+        self.div_steps    = 0                  #/* 流用ステップ          */
+        self.del_steps    = 0                  #/* 削除ステップ          */
+        return
+
+    def set_diff_steps(self, new_steps, base_steps, mod_steps, div_steps, del_steps):
+        self.new_steps    = new_steps
+        self.base_steps   = base_steps
+        self.mod_steps    = mod_steps
+        self.div_steps    = div_steps
+        self.del_steps    = del_steps
+        self.real_steps   = new_steps + mod_steps + div_steps    #http://ciao-ware.c.ooco.jp/ft_faq_kazo004.html
+        return
+
+    def add_steps(self, steps):
+        self.real_steps   += steps.real_steps
+        self.new_steps    += steps.new_steps
+        self.base_steps   += steps.base_steps
+        self.mod_steps    += steps.mod_steps
+        self.div_steps    += steps.div_steps
+        self.del_steps    += steps.del_steps
+        return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオの関数（モジュール） 情報保持クラス                           */
+#/*****************************************************************************/
+class cKazoeModule:
+    def __init__(self):
+        self.before_path  = ""
+        self.after_path   = ""
+        self.file_name    = ""
+        self.module_name  = ""
+        self.module_type  = ""
+        self.steps        = None
+        return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオの結果をソースファイルごとに集計した情報を保持するクラス      */
+#/*****************************************************************************/
+class cKazoeFile:
+    def __init__(self):
+        self.file_name    = ""
+        self.file_steps   = cKazoeSteps()
+        self.modules      = []
+        return
+
+    def add_one_module_line(self, after_path, before_path, module_name, module_type, steps):
+        module = cKazoeModule()
+        module.after_path       = after_path
+        module.before_path      = before_path
+        module.module_name      = module_name
+        module.module_type      = module_type
+        module.steps            = steps
+        if (before_path != ""):
+            print("%s, %s, %s, %d, %d, %d, %d, %d, %d" % (module.before_path, module.after_path, module.module_name, module.steps.real_steps, module.steps.new_steps, module.steps.base_steps, module.steps.mod_steps, module.steps.div_steps, module.steps.del_steps))
+        else:
+            print("%s, %s, %d" % (module.after_path, module.module_name, module.steps.real_steps))
+        self.modules.append(module)
+        self.file_steps.add_steps(steps)
+        return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオの結果ファイル（csv）情報保持クラス                           */
+#/*****************************************************************************/
+class cKazoeResult:
+    def __init__(self):
+        self.rslt_file    = ""                 #/* CSVファイルの相対パス */
+        self.before_rev   = 0                  #/* 変更前のRevision      */
+        self.after_rev    = 0                  #/* 変更後のRevision      */
+        self.modules      = []
+        self.files        = []
+        self.total_steps  = None               #/* TotalのStep数情報     */
+        return
+
+    def find_file_class(self, file_name):
+        for file in self.files:
+            if (file_name == file.file_name):
+                return file
+
+        new_file = cKazoeFile()
+        new_file.file_name = file_name
+        self.files.append(new_file)
+        return new_file
+
+    def add_one_module_line(self, after_path, before_path, module_name, module_type, steps):
+        rslt_path = os.path.dirname(self.rslt_file).replace("\\", "\\\\") + r"\\export"
+        file_name = ""
+
+        #/* 絶対パスからファイル名を取得する */
+        result = re.search(rslt_path + r"\\(.+)$", after_path)
+        if (result):
+            file_name = result.group(1)
+            file = self.find_file_class(file_name)
+            file.add_one_module_line(after_path, before_path, module_name, module_type, steps)
+        else:
+            print("no hit %s : %s" % (after_path, rslt_path + r"\\(.+)$"))
         return
 
 
@@ -190,6 +322,7 @@ def check_command_line_option():
     global g_path2
     global g_out_path
     global g_full_path
+    global g_kazoe_only
 
     argc = len(sys.argv)
     option = ""
@@ -231,6 +364,8 @@ def check_command_line_option():
             option = "k"
         elif (arg == "-o"):
             option = "o"
+        elif (arg == "-ko"):
+            g_kazoe_only = 1
         elif (g_path1 == ""):
             if (result := re.search(r"\/$", arg)):
 #               print("end by /")
@@ -450,33 +585,132 @@ def clean_ciao_rslt(target_path):
 
 
 #/*****************************************************************************/
-#/* かぞえチャオ自動実行ファイル（*.cas）作成                                 */
+#/* かぞえチャオ出力ファイルの確認                                            */
 #/*****************************************************************************/
-def output_cas_text(target_path, before, after):
+def find_ciao_rslt(target_path):
+    files = os.listdir(target_path)
+
+    for filename in files:
+        if (os.path.isfile(target_path + "\\" + filename)):
+            if (result := re.match(r"^ciao_rslt[0-9]+_[0-9]+.csv",filename)):
+                print("find ciao rslt file : %s" % (target_path + "\\" + filename))
+                return (target_path + "\\" + filename)
+
+    return ""
+
+
+#/*****************************************************************************/
+#/* かぞえチャオ出力ファイルの確認(outpath全検索)                             */
+#/*****************************************************************************/
+def find_ciao_rslt_all():
+    global g_kazoe_rslts
+    before_rev = 0
+
+    #/* かぞえチャオ結果確認のみの場合、ここで結果のcsvファイルをチェックしていく */
+    if (g_kazoe_only == 1):
+        files = os.listdir(g_out_path)
+
+        for dir_name in files:
+            if (os.path.isdir(g_out_path + "\\" + dir_name)):
+                if (result := re.match(r"^rev_([0-9]+)",dir_name)):
+                    rslt_file = find_ciao_rslt(g_out_path + "\\" + dir_name)
+                    if (rslt_file != ""):
+                        rslt = cKazoeResult()
+                        rslt.rslt_file = rslt_file
+                        rslt.after_rev = int(result.group(1))
+                        g_kazoe_rslts.append(rslt)
+                    else:
+                        before_rev = result.group(1)
+
+
+    #/* 変更後Revisionでソートする */
+    g_kazoe_rslts.sort(key=attrgetter('after_rev'))
+
+
+    #/* かぞえチャオ結果確認のみの場合、さらに変更前Revisionをセットする */
+    if (g_kazoe_only == 1):
+        for rslt in g_kazoe_rslts:
+            rslt.before_rev = before_rev
+            before_rev = rslt.after_rev
+
+    return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオ出力結果の読み込み                                            */
+#/*****************************************************************************/
+def read_ciao_rslt(rslt):
+    csv = open(rslt.rslt_file, 'r')
+    read_lines = csv.readlines()
+    rslt_path = os.path.dirname(rslt.rslt_file).replace("\\", "\\\\") + r"\\export"
+    print("read kazoe result file for rev %d : %s : %s" % (rslt.after_rev, rslt.rslt_file, rslt_path))
+
+    read_lines.pop(0)
+    for line in read_lines:
+#       print(line)
+        if (result := re_kazoe_module.match(line)):
+            steps = cKazoeSteps()
+            steps.set_diff_steps(int(result.group(5)), int(result.group(6)), int(result.group(7)), int(result.group(8)), int(result.group(9)))
+            rslt.add_one_module_line(result.group(1), result.group(2), result.group(3), result.group(4), steps)
+        elif (result := re_kazoe_single_module.match(line)):
+            steps = cKazoeSteps()
+            steps.real_steps = int(result.group(5))
+            rslt.add_one_module_line(result.group(1), "", result.group(2), result.group(3), steps)
+        elif (result := re_kazoe_total.match(line)):
+            steps = cKazoeSteps()
+            steps.set_diff_steps(int(result.group(1)), int(result.group(2)), int(result.group(3)), int(result.group(4)), int(result.group(5)))
+            rslt.total_steps = steps
+            print("total steps : %d, %d, %d, %d, %d" % (rslt.total_steps.new_steps, rslt.total_steps.base_steps, rslt.total_steps.mod_steps, rslt.total_steps.div_steps, rslt.total_steps.del_steps))
+        elif (result := re_kazoe_single_total.match(line)):
+            steps = cKazoeSteps()
+            steps.real_steps = int(result.group(2))
+            rslt.total_steps = steps
+            print("total steps : %d" % (rslt.total_steps.real_steps))
+
+    csv.close()
+    return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオ自動実行ファイル（*.cas）作成と実行                           */
+#/*****************************************************************************/
+def output_cas_text(revision, pre_revision, target_path, before, after):
     global g_out_cas_file
+    global g_kazoe_rslts
 
     if (g_out_cas_file != 0):
         target_path = os.getcwd() + "\\" + target_path.replace("/", "\\")
         file_path = target_path + "/diff_kazoe.cas"
         with open(file_path, "w") as outfile:
-            after_path  = os.getcwd() + "\\" + after.replace("/", "\\")
-            before_path = os.getcwd() + "\\" + before.replace("/", "\\")
-            print(r"[AFTPATH]", file = outfile)
-            print(after_path,   file = outfile)
-            print(r"[BFRPATH]", file = outfile)
-            print(before_path,  file = outfile)
-            print(r"[EXEMODE]", file = outfile)
-            print(r"1",  file = outfile)
-            print(r"[RSLMODE]", file = outfile)
-            print(r"0",  file = outfile)
-            print(r"[RSLPATH]", file = outfile)
-            print(target_path,  file = outfile)
-            outfile.close()
-            clean_ciao_rslt(target_path)
+                after_path  = os.getcwd() + "\\" + after.replace("/", "\\")
+                before_path = os.getcwd() + "\\" + before.replace("/", "\\")
+                print(r"[AFTPATH]", file = outfile)
+                print(after_path,   file = outfile)
+                print(r"[BFRPATH]", file = outfile)
+                print(before_path,  file = outfile)
+                print(r"[EXEMODE]", file = outfile)
+                if (pre_revision != 0):
+                    print(r"1",  file = outfile)
+                else:
+                    print(r"2",  file = outfile)
+                print(r"[RSLMODE]", file = outfile)
+                print(r"0",  file = outfile)
+                print(r"[RSLPATH]", file = outfile)
+                print(target_path,  file = outfile)
+                outfile.close()
+                clean_ciao_rslt(target_path)
 
-            kazoe_cmd = g_kazoe_path + "\\" + "kazoeciao.exe /a" + file_path
-            print(kazoe_cmd)
-            lines = cmd_execute(kazoe_cmd, "", "")
+                kazoe_cmd = g_kazoe_path + "\\" + "kazoeciao.exe /a" + file_path
+                print(kazoe_cmd)
+                lines = cmd_execute(kazoe_cmd, "", "")
+
+                rslt_file = find_ciao_rslt(target_path)
+                if (rslt_file != ""):
+                    rslt = cKazoeResult()
+                    rslt.rslt_file  = rslt_file
+                    rslt.after_rev  = revision
+                    rslt.before_rev = pre_revision
+                    g_kazoe_rslts.append(rslt)
 
     return
 
@@ -496,7 +730,9 @@ def output_log_files(path_log, commit_log, pre_revision):
     export_path = rev_path + "/export"
     out_path = rev_path
     pre_path = g_out_path + "/rev_" + str(pre_revision)
+
     if ((pre_revision == 0) or (g_patch_mode == 0)):
+        #/* 初回のRevisionもしくはパッチモードOFFの場合は全ファイルexportで取得 */
         cmd_base = "svn export -r " + str(commit_log.revision) + " "
         make_directory(export_path)
         for target in path_log.targets:
@@ -528,9 +764,10 @@ def output_log_files(path_log, commit_log, pre_revision):
         lines = cmd_execute(patch_cmd, "", out_diff)
         os.remove(out_diff)
 
-    if (pre_revision != 0):
-        output_cas_text(rev_path, pre_path + "/export", export_path)
+    #/* かぞえチャオ自動実行 */
+    output_cas_text(commit_log.revision, pre_revision, rev_path, pre_path + "/export", export_path)
 
+    #/* コミットログの内容をテキストファイルに出力 */
     output_log_text(rev_path, commit_log)
     return
 
@@ -564,16 +801,53 @@ def output_path_files():
 
 
 #/*****************************************************************************/
+#/* かぞえチャオの出力ファイルの読み出し                                      */
+#/*****************************************************************************/
+def check_kazoe_result():
+    global g_kazoe_rslts
+    global g_out_cas_file
+
+    if (g_out_cas_file != 0):
+        find_ciao_rslt_all()
+
+        for rslt in g_kazoe_rslts:
+            read_ciao_rslt(rslt)
+
+    return
+
+
+#/*****************************************************************************/
+#/* かぞえチャオの情報履歴の出力                                              */
+#/*****************************************************************************/
+def out_kazoe_history():
+    global g_kazoe_rslts
+    global g_out_cas_file
+
+    if (g_out_cas_file != 0):
+        for rslt in g_kazoe_rslts:
+            pass
+
+    return
+
+
+#/*****************************************************************************/
 #/* メイン関数                                                                */
 #/*****************************************************************************/
 def main():
+    global g_kazoe_only
+
     start_time = time.perf_counter()
 
     check_command_line_option()
     log_settings()
-    check_repo_info()
-    check_path_log()
-    output_path_files()
+
+    if (g_kazoe_only == 0):
+        check_repo_info()
+        check_path_log()
+        output_path_files()
+
+    check_kazoe_result()
+    out_kazoe_history()
 
     end_time = time.perf_counter()
     now = datetime.datetime.now()
