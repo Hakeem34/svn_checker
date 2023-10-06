@@ -14,6 +14,13 @@ from operator import itemgetter
 from operator import attrgetter
 
 
+#/* 対象パス */
+g_target_paths      = []
+
+#/* 除外パス */
+g_except_paths      = []
+
+
 g_stop_on_copy      = 0
 g_full_path         = 0
 g_log_limit         = 0
@@ -24,7 +31,6 @@ g_path2             = ""
 g_path_logs         = []
 g_repo_info         = None
 g_out_path          = "out"
-g_target_paths      = []
 g_log_file_name     = ""
 g_default_log       = 1
 g_patch_mode        = 0
@@ -298,12 +304,18 @@ def force_copy_directory(src_path, dst_path):
 def is_path_in_target(path):
     global g_target_paths
 
+    #/* 除外パスにヒットしたらFalse */
+    for except_path in g_except_paths:
+        if (re.search(except_path, path)):
+            return False
+
     #/* ターゲットパス指定が空の場合は、trueを返す */
     if not g_target_paths:
         return True
 
-    for target in g_target_paths:
-        if (re.search(target, path)):
+    #/* ターゲットパスにヒットしたらTrue */
+    for target_path in g_target_paths:
+        if (re.search(target_path, path)):
             return True
 
     return False
