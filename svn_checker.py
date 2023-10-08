@@ -3,8 +3,6 @@ import sys
 import re
 import datetime
 import subprocess
-import openpyxl
-import difflib
 import errno
 import time
 import datetime
@@ -12,6 +10,11 @@ import shutil
 from pathlib  import Path
 from operator import itemgetter
 from operator import attrgetter
+
+import openpyxl
+from openpyxl.styles import Alignment
+
+import difflib
 
 
 #/* 対象パス */
@@ -38,13 +41,15 @@ g_patch_mode        = 0
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
 g_out_cas_file      = 1
-g_kazoe_rslts       = []
 g_kazoe_only        = 0
+g_out_xlsx_file     = ""
+g_kazoe_history     = None
 
 re_log_line            = re.compile(r"^r([0-9]+)\s\|\s([^\|]+)\s\|\s([0-9]+)-([0-9]+)-([0-9]+)\s([0-9]+):([0-9]+):([0-9]+)\s[^\|]+\s\|\s([0-9]+)\sline")
 re_change_line         = re.compile(r"^\s+([MADR])\s([^\s]+)")
 re_change_file         = re.compile(r"\/([^\/]+)$")
 re_kazoe_module        = re.compile(r"\"([^\"]+)\",\"([^\"]+)\",\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
+re_kazoe_module_after  = re.compile(r"\"([^\"]+)\", ,\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
 re_kazoe_single_module = re.compile(r"\"([^\"]+)\",\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9\.]+)")
 re_kazoe_total         = re.compile(r"全ステップ数,\s*,\s*,\s*,([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
 re_kazoe_single_total  = re.compile(r"全ステップ数,\s*,\s*,([0-9]+),([0-9]+),([0-9\.]+)")
@@ -81,16 +86,73 @@ class cCommitLog:
         self.changes  = []
         return
 
+    #/* コミットログの内容出力 */
+    def output_log_text(self, target_path):
+        file_path = target_path + "/commit_log.txt"
+        with open(file_path, "w") as outfile:
+            print("Revision : " + str(self.revision),  file = outfile)
+            print("Author   : " + self.author,         file = outfile)
+            print("Date     : %04d/%02d/%02d" % (self.year, self.month,  self.day),    file = outfile)
+            print("Time     : %02d:%02d:%02d" % (self.hour, self.minute, self.second), file = outfile)
+            print("", file = outfile)
+            for comment in self.comments:
+                print("Comment  : " + comment, file = outfile)
+
+            print("", file = outfile)
+
+            for change in self.changes:
+                print("Files    : %s   %s" % (change.attribute, change.path), file = outfile)
+
+            print("", file = outfile)
+        return
+
+    #/* コミットログの内容読み込み */
+    def input_log_text(self, target_path):
+        file_path = target_path + "/commit_log.txt"
+
+        read_file = open(file_path, 'r')
+        read_lines = read_file.readlines()
+
+        for line in read_lines:
+            if   (result := re.match(r"Revision : ([0-9]+)", line)):
+                self.revision = int(result.group(1))
+            elif (result := re.match(r"Author   : ([^\n]+)", line)):
+                self.author   = result.group(1)
+            elif (result := re.match(r"Date     : ([0-9]+)\/([0-9]+)\/([0-9]+)", line)):
+                self.year     = int(result.group(1))
+                self.month    = int(result.group(2))
+                self.day      = int(result.group(3))
+            elif (result := re.match(r"Time     : ([0-9]+)\/([0-9]+)\/([0-9]+)", line)):
+                self.hour     = int(result.group(1))
+                self.minute   = int(result.group(2))
+                self.second   = int(result.group(3))
+            elif (result := re.match(r"Comment  : ([^\n]+)", line)):
+                self.comments.append(result.group(1))
+        return
+
 
 #/*****************************************************************************/
 #/* svn logで得られる情報の保持クラス                                         */
 #/*****************************************************************************/
 class cPathLog:
     def __init__(self):
-        self.path     = ""
-        self.option   = ""
-        self.logs     = []
-        self.targets  = []
+        self.path      = ""
+        self.option    = ""
+        self.logs      = []
+        self.targets   = []
+        self.first_rev = 0
+        self.last_rev  = 0
+        return
+
+    def sort_revision(self):
+        self.logs.sort(key=attrgetter('revision'))
+        if not self.logs:
+            self.first_rev = 0
+            self.last_rev  = 0
+        else:
+            self.first_rev = self.logs[0].revision
+            self.last_rev  = self.logs[-1].revision
+
         return
 
 
@@ -121,6 +183,7 @@ class cKazoeSteps:
         self.del_steps    = 0                  #/* 削除ステップ          */
         return
 
+    #/* 差分ステップの登録 */
     def set_diff_steps(self, new_steps, base_steps, mod_steps, div_steps, del_steps):
         self.new_steps    = new_steps
         self.base_steps   = base_steps
@@ -130,6 +193,7 @@ class cKazoeSteps:
         self.real_steps   = new_steps + mod_steps + div_steps    #http://ciao-ware.c.ooco.jp/ft_faq_kazo004.html
         return
 
+    #/* ステップの加算登録 */
     def add_steps(self, steps):
         self.real_steps   += steps.real_steps
         self.new_steps    += steps.new_steps
@@ -164,6 +228,7 @@ class cKazoeFile:
         self.modules      = []
         return
 
+    #/* モジュールステップ行の処理 */
     def add_one_module_line(self, after_path, before_path, module_name, module_type, steps):
         module = cKazoeModule()
         module.after_path       = after_path
@@ -191,8 +256,10 @@ class cKazoeResult:
         self.modules      = []
         self.files        = []
         self.total_steps  = None               #/* TotalのStep数情報     */
+        self.commit_log   = None               #/* cCommitLogへの参照    */
         return
 
+    #/* ファイル名からcKazoeFileクラスのインスタンスを取得 */
     def find_file_class(self, file_name):
         for file in self.files:
             if (file_name == file.file_name):
@@ -203,6 +270,7 @@ class cKazoeResult:
         self.files.append(new_file)
         return new_file
 
+    #/* モジュールステップ行の処理 */
     def add_one_module_line(self, after_path, before_path, module_name, module_type, steps):
         rslt_path = os.path.dirname(self.rslt_file).replace("\\", "\\\\") + r"\\export"
         file_name = ""
@@ -219,12 +287,36 @@ class cKazoeResult:
 
 
 #/*****************************************************************************/
+#/* 履歴情報出力クラス                                                        */
+#/*****************************************************************************/
+class cKazoeHistory:
+    def __init__(self):
+        self.first_rev    = 0                  #/* 最初のリビジョン      */
+        self.last_rev     = 0                  #/* 最後のリビジョン      */
+        self.url          = 0                  #/* リポジトリURL         */
+        self.rslts        = []
+        return
+
+    def sort_revision(self):
+        self.rslts.sort(key=attrgetter('after_rev'))
+
+        if not self.rslts:
+            self.first_rev = 0
+            self.last_rev  = 0
+        else:
+            self.first_rev = self.rslts[0].after_rev
+            self.last_rev  = self.rslts[-1].after_rev
+        return
+
+
+#/*****************************************************************************/
 #/* ログファイル設定                                                          */
 #/*****************************************************************************/
 def log_settings():
     global g_log_file_name
     global g_out_path
     global g_default_log
+    global g_out_xlsx_file
 
 
     make_directory(g_out_path)
@@ -237,6 +329,7 @@ def log_settings():
         now = datetime.datetime.now()
         formatted_time = now.strftime("%Y%m%d_%H%M%S")
         log_path = g_out_path + "\\svn_checker_" + formatted_time + ".log";
+        g_out_xlsx_file = g_out_path + "\\svn_checker_" + formatted_time + ".xslx";
 
     print ("log_path : %s" % log_path)
 
@@ -335,6 +428,8 @@ def check_command_line_option():
     global g_out_path
     global g_full_path
     global g_kazoe_only
+    global g_out_cas_file
+    global g_kazoe_history
 
     argc = len(sys.argv)
     option = ""
@@ -394,6 +489,10 @@ def check_command_line_option():
     if (g_path1 == ""):
         print("svn_checker.py : no target path!")
         exit(-1)
+
+    if (g_out_cas_file != 0):
+        g_kazoe_history = cKazoeHistory()
+        g_kazoe_history.url = g_path1
 
     return
 
@@ -495,7 +594,7 @@ def check_log(target_path, revision, limit):
 
     #/* 最後にターゲットpathの重複を削除して、ログをRevisionの昇順でソートして登録する */
     path_log.targets = set(path_log.targets)
-    path_log.logs.sort(key=attrgetter('revision'))
+    path_log.sort_revision()
     g_path_logs.append(path_log)
     return
 
@@ -556,31 +655,6 @@ def check_repo_info():
     return
 
 
-
-#/*****************************************************************************/
-#/* コミットログ内容を出力                                                    */
-#/*****************************************************************************/
-def output_log_text(target_path, commit_log):
-    file_path = target_path + "/commit_log.txt"
-    with open(file_path, "w") as outfile:
-        print("Revision : " + str(commit_log.revision),  file = outfile)
-        print("Author   : " + commit_log.author,         file = outfile)
-        print("Date     : %04d/%02d/%02d" % (commit_log.year, commit_log.month, commit_log.day),     file = outfile)
-        print("Time     : %02d:%02d:%02d" % (commit_log.hour, commit_log.minute, commit_log.second), file = outfile)
-        print("", file = outfile)
-        for comment in commit_log.comments:
-            print("Comment  : " + comment, file = outfile)
-
-        print("", file = outfile)
-
-        for change in commit_log.changes:
-            print("Files    : %s   %s" % (change.attribute, change.path), file = outfile)
-
-        print("", file = outfile)
-
-    return
-
-
 #/*****************************************************************************/
 #/* かぞえチャオ出力ファイルの削除                                            */
 #/*****************************************************************************/
@@ -608,6 +682,10 @@ def find_ciao_rslt(target_path):
                 print("find ciao rslt file : %s" % (target_path + "\\" + filename))
                 return (target_path + "\\" + filename)
 
+            if (result := re.match(r"^ciao_rslt_r[0-9]+_r[0-9]+.csv",filename)):
+                print("find ciao rslt file : %s" % (target_path + "\\" + filename))
+                return (target_path + "\\" + filename)
+
     return ""
 
 
@@ -615,7 +693,7 @@ def find_ciao_rslt(target_path):
 #/* かぞえチャオ出力ファイルの確認(outpath全検索)                             */
 #/*****************************************************************************/
 def find_ciao_rslt_all():
-    global g_kazoe_rslts
+    global g_kazoe_history
     before_rev = 0
 
     #/* かぞえチャオ結果確認のみの場合、ここで結果のcsvファイルをチェックしていく */
@@ -630,18 +708,23 @@ def find_ciao_rslt_all():
                         rslt = cKazoeResult()
                         rslt.rslt_file = rslt_file
                         rslt.after_rev = int(result.group(1))
-                        g_kazoe_rslts.append(rslt)
+
+                        commit_log = cCommitLog()
+                        commit_log.input_log_text(g_out_path + "\\" + dir_name)
+                        rslt.commit_log = commit_log
+                        g_kazoe_history.rslts.append(rslt)
                     else:
                         before_rev = result.group(1)
 
 
     #/* 変更後Revisionでソートする */
-    g_kazoe_rslts.sort(key=attrgetter('after_rev'))
+#   g_kazoe_history.rslts.sort(key=attrgetter('after_rev'))
+    g_kazoe_history.sort_revision()
 
 
     #/* かぞえチャオ結果確認のみの場合、さらに変更前Revisionをセットする */
     if (g_kazoe_only == 1):
-        for rslt in g_kazoe_rslts:
+        for rslt in g_kazoe_history.rslts:
             rslt.before_rev = before_rev
             before_rev = rslt.after_rev
 
@@ -664,6 +747,10 @@ def read_ciao_rslt(rslt):
             steps = cKazoeSteps()
             steps.set_diff_steps(int(result.group(5)), int(result.group(6)), int(result.group(7)), int(result.group(8)), int(result.group(9)))
             rslt.add_one_module_line(result.group(1), result.group(2), result.group(3), result.group(4), steps)
+        elif (result := re_kazoe_module_after.match(line)):
+            steps = cKazoeSteps()
+            steps.set_diff_steps(int(result.group(4)), int(result.group(5)), int(result.group(6)), int(result.group(7)), int(result.group(8)))
+            rslt.add_one_module_line(result.group(1), " ", result.group(2), result.group(3), steps)
         elif (result := re_kazoe_single_module.match(line)):
             steps = cKazoeSteps()
             steps.real_steps = int(result.group(5))
@@ -686,10 +773,11 @@ def read_ciao_rslt(rslt):
 #/*****************************************************************************/
 #/* かぞえチャオ自動実行ファイル（*.cas）作成と実行                           */
 #/*****************************************************************************/
-def output_cas_text(revision, pre_revision, target_path, before, after):
+def output_cas_text(commit_log, pre_revision, target_path, before, after):
     global g_out_cas_file
-    global g_kazoe_rslts
+    global g_kazoe_history
 
+    revision = commit_log.revision
     if (g_out_cas_file != 0):
         target_path = os.getcwd() + "\\" + target_path.replace("/", "\\")
         file_path = target_path + "/diff_kazoe.cas"
@@ -717,12 +805,16 @@ def output_cas_text(revision, pre_revision, target_path, before, after):
                 lines = cmd_execute(kazoe_cmd, "", "")
 
                 rslt_file = find_ciao_rslt(target_path)
+                rename_file = os.path.dirname(rslt_file) + "\\ciao_rslt_r" + str(pre_revision) + "_r" + str(revision) + ".csv"
                 if (rslt_file != ""):
+                    print("rename [%s] to [%s]" % (rslt_file, rename_file))
+                    os.rename(rslt_file, rename_file)
                     rslt = cKazoeResult()
-                    rslt.rslt_file  = rslt_file
+                    rslt.rslt_file  = rename_file
                     rslt.after_rev  = revision
                     rslt.before_rev = pre_revision
-                    g_kazoe_rslts.append(rslt)
+                    rslt.commit_log = commit_log
+                    g_kazoe_history.rslts.append(rslt)
 
     return
 
@@ -777,10 +869,10 @@ def output_log_files(path_log, commit_log, pre_revision):
         os.remove(out_diff)
 
     #/* かぞえチャオ自動実行 */
-    output_cas_text(commit_log.revision, pre_revision, rev_path, pre_path + "/export", export_path)
+    output_cas_text(commit_log, pre_revision, rev_path, pre_path + "/export", export_path)
 
     #/* コミットログの内容をテキストファイルに出力 */
-    output_log_text(rev_path, commit_log)
+    commit_log.output_log_text(rev_path)
     return
 
 
@@ -816,28 +908,230 @@ def output_path_files():
 #/* かぞえチャオの出力ファイルの読み出し                                      */
 #/*****************************************************************************/
 def check_kazoe_result():
-    global g_kazoe_rslts
+    global g_kazoe_history
     global g_out_cas_file
 
     if (g_out_cas_file != 0):
         find_ciao_rslt_all()
 
-        for rslt in g_kazoe_rslts:
+        for rslt in g_kazoe_history.rslts:
             read_ciao_rslt(rslt)
 
     return
 
 
 #/*****************************************************************************/
+#/* シートの存在確認                                                          */
+#/*****************************************************************************/
+def check_ws_exists(wb, sheet_name):
+    for ws in wb.worksheets:
+        if (ws.title == sheet_name):
+            return True
+
+    return False
+
+#/*****************************************************************************/
+#/* セルのテキスト検索                                                        */
+#/*****************************************************************************/
+def find_row(ws, col, row, name):
+    while (ws.cell(row, col).value != None):
+        if (ws.cell(row, col).value == name):
+            return row
+
+        row += 1
+
+    ws.cell(row, col).value = name
+    return row
+
+
+#/*****************************************************************************/
 #/* かぞえチャオの情報履歴の出力                                              */
 #/*****************************************************************************/
 def out_kazoe_history():
-    global g_kazoe_rslts
+    global g_kazoe_history
     global g_out_cas_file
+    global g_out_xlsx_file
 
     if (g_out_cas_file != 0):
-        for rslt in g_kazoe_rslts:
-            pass
+        wb = openpyxl.Workbook()
+        ws = wb.worksheets[0]
+        ws.title = "ファイル履歴"
+
+        col = 2
+        ws.cell(2, col).value = g_kazoe_history.url
+        ws.cell(3, col).value = r"Rev." + str(g_kazoe_history.first_rev) + r" - " + r"Rev." + str(g_kazoe_history.last_rev)
+        ws.cell(5, col).value = "Revision"
+        ws.cell(6, col).value = "Author"
+        ws.cell(7, col).value = "Comment"
+        ws.cell(8, col).value = "全体"
+
+        rev_count         = 0
+        max_comment_count = 1
+        max_file_name     = 9
+        file_with_modules = set()
+
+        #/* ファイル単位のステップカウント履歴を作成 */
+        for rslt in g_kazoe_history.rslts:
+
+            #/* セル結合してリビジョンを出力 */
+            ws.merge_cells(start_row= 5, end_row=5, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(5, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+            ws.cell(5, col + (rev_count * 3) + 1).value = rslt.commit_log.revision
+
+            #/* セル結合してAuthorを出力 */
+            ws.merge_cells(start_row= 6, end_row=6, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(6, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+            ws.cell(6, col + (rev_count * 3) + 1).value = rslt.commit_log.author
+
+            #/* セル結合してコメントを出力 */
+            ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+            comment = ""
+            comment_count = 1
+            for comment_line in rslt.commit_log.comments:
+                if (comment == ""):
+                    comment = comment_line
+                else:
+                    comment += "\n" + comment_line
+                    comment_count += 1
+            ws.cell(7, col + (rev_count * 3) + 1).value = comment
+            if (comment_count > max_comment_count):
+                ws.row_dimensions[7].height = comment_count * 18
+                max_comment_count = comment_count
+
+            #/* 全体のステップ数（新規＋変更、削除、実ステップ）を出力 */
+            ws.cell(8, col + (rev_count * 3) + 1).value = rslt.total_steps.new_steps + rslt.total_steps.mod_steps
+            ws.cell(8, col + (rev_count * 3) + 2).value = rslt.total_steps.del_steps
+            ws.cell(8, col + (rev_count * 3) + 3).value = rslt.total_steps.real_steps
+
+            #/* ファイル単位のステップ数出力 */
+            for file_rslt in rslt.files:
+                row = find_row(ws, col, 9, file_rslt.file_name)
+                ws.cell(row, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
+                ws.cell(row, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
+                ws.cell(row, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
+
+                #/* 最長ファイル名の長さに合わせてB列幅を調整 */
+                if (len(file_rslt.file_name) > max_file_name):
+                    max_file_name = len(file_rslt.file_name)
+                    ws.column_dimensions['B'].width = max_file_name * 1
+
+                #/* 複数モジュールを持つファイルをピックアップしておく */
+                if (len(file_rslt.modules) > 1):
+                    length_before = len(file_with_modules)
+                    file_with_modules.add(file_rslt.file_name)
+                    if (len(file_with_modules) > length_before):
+                        print("add file with modules [%s] in Rev.%d" % (file_rslt.file_name, rslt.commit_log.revision))
+
+            rev_count += 1
+
+
+        #/* ファイル毎にモジュール単位のステップカウント履歴を作成 */
+        for file_with_module in file_with_modules:
+            file_name = os.path.basename(file_with_module)
+            if (len(file_name) > 31):
+                print("too long file name! [%s]" % (file_name))
+                file_name = file_name[:31]
+
+            letter = 0
+            while (check_ws_exists(wb, file_name)):
+                print("Sheet Name Duplication! [%s]" % (file_name))
+                file_name = file_name[:30]
+                file_name += chr(ord('A') + letter)
+                letter += 1
+
+            ws = wb.create_sheet(file_name)
+
+            col = 2
+            ws.cell(2, col).value = file_with_module
+            ws.cell(3, col).value = r"Rev." + str(g_kazoe_history.first_rev) + r" - " + r"Rev." + str(g_kazoe_history.last_rev)
+            ws.cell(5, col).value = "Revision"
+            ws.cell(6, col).value = "Author"
+            ws.cell(7, col).value = "Comment"
+            ws.cell(8, col).value = "全体"
+            ws.cell(9, col).value = "変更関数"
+
+            rev_count         = 0
+            max_comment_count = 1
+            max_file_name     = 9
+            max_line_count    = 1
+
+            #/* ファイル単位のステップカウント履歴を作成 */
+            for rslt in g_kazoe_history.rslts:
+
+                #/* セル結合してリビジョンを出力 */
+                ws.merge_cells(start_row= 5, end_row=5, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(5, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+                ws.cell(5, col + (rev_count * 3) + 1).value = rslt.commit_log.revision
+
+                #/* セル結合してAuthorを出力 */
+                ws.merge_cells(start_row= 6, end_row=6, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(6, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+                ws.cell(6, col + (rev_count * 3) + 1).value = rslt.commit_log.author
+
+                #/* セル結合してコメントを出力 */
+                ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+                comment = ""
+                comment_count = 1
+                for comment_line in rslt.commit_log.comments:
+                    if (comment == ""):
+                        comment = comment_line
+                    else:
+                        comment += "\n" + comment_line
+                        comment_count += 1
+                ws.cell(7, col + (rev_count * 3) + 1).value = comment
+                if (comment_count > max_comment_count):
+                    ws.row_dimensions[7].height = comment_count * 18
+                    max_comment_count = comment_count
+
+                changed_functions = []
+                for file_rslt in rslt.files:
+                    if (file_rslt.file_name == file_with_module):
+                        #/* 全体のステップ数（新規＋変更、削除、実ステップ）を出力 */
+                        ws.cell(8, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
+                        ws.cell(8, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
+                        ws.cell(8, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
+
+                        #/* モジュール（関数）単位のステップ数出力 */
+                        for module_rslt in file_rslt.modules:
+                            row = find_row(ws, col, 10, module_rslt.module_name)
+                            ws.cell(row, col + (rev_count * 3) + 1).value = module_rslt.steps.new_steps + module_rslt.steps.mod_steps
+                            ws.cell(row, col + (rev_count * 3) + 2).value = module_rslt.steps.del_steps
+                            ws.cell(row, col + (rev_count * 3) + 3).value = module_rslt.steps.real_steps
+
+                            #/* 最長モジュール名の長さに合わせてB列幅を調整 */
+                            if (len(module_rslt.module_name) > max_file_name):
+                                max_file_name = len(module_rslt.module_name)
+                                ws.column_dimensions['B'].width = max_file_name * 1
+
+                            #/* 変更のあったモジュール（関数）をピックアップ(ついで末尾の節だけを拾って、型情報とかはそぎ落とす) */
+                            if ((module_rslt.steps.new_steps + module_rslt.steps.mod_steps + module_rslt.steps.del_steps) > 0):
+                                changed_function = module_rslt.module_name.split(" ")[-1]
+                                changed_functions.append(changed_function)
+
+                #/* セル結合してコメントを出力 */
+                ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+                changed = ""
+
+                #/* 変更のあったモジュールの出力 */
+                line_count = 1
+                for changed_function in changed_functions:
+                    if (changed == ""):
+                        changed = changed_function
+                    else:
+                        changed += "\n" + changed_function
+                        line_count += 1
+                ws.cell(9, col + (rev_count * 3) + 1).value = changed
+
+                if (line_count > max_line_count):
+                    ws.row_dimensions[9].height = line_count * 18
+                    max_line_count = line_count
+
+                rev_count += 1
+
+        wb.save(g_out_xlsx_file)
 
     return
 
