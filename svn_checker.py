@@ -399,12 +399,17 @@ def force_copy_directory(src_path, dst_path):
 #/* ターゲットパス判定                                                        */
 #/*****************************************************************************/
 def is_path_in_target(path):
+    global g_repo_info
     global g_target_paths
 
     #/* 除外パスにヒットしたらFalse */
     for except_path in g_except_paths:
         if (re.search(except_path, path)):
             return False
+
+    #/* relative_dirそのものはターゲットから除外する */
+    if (path == g_repo_info.relative_dir):
+        return False
 
     #/* ターゲットパス指定が空の場合は、trueを返す */
     if not g_target_paths:
@@ -857,14 +862,14 @@ def output_log_files(path_log, commit_log, pre_revision):
         make_directory(export_path)
         for target in path_log.targets:
             if (is_path_in_target(target)):
-#               print("out for %d : %s" % (commit_log.revision, target))
+                print("out for %d : %s" % (commit_log.revision, target))
                 if (g_full_path):
                     out_path = export_path + os.path.dirname(target)
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
                 else:
                     out_path = export_path + os.path.dirname(target).replace(g_repo_info.relative_dir, "")
                     export_cmd = cmd_base + g_repo_info.root + target + " " + out_path
-                print("create path : %s" % (out_path))
+                print("create path : %s, relative : %s" % (out_path, g_repo_info.relative_dir))
                 make_directory(out_path)
                 print("export : %s" % (export_cmd))
                 lines = cmd_execute(export_cmd, "", "")
