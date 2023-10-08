@@ -17,11 +17,15 @@ from openpyxl.styles import Alignment
 import difflib
 
 
+const_row_heigt = 12
+const_col_width = 1
+
+
 #/* 対象パス */
-g_target_paths      = []
+g_target_paths      = set([])
 
 #/* 除外パス */
-g_except_paths      = []
+g_except_paths      = set([])
 
 
 g_stop_on_copy      = 0
@@ -53,7 +57,7 @@ re_kazoe_module_after  = re.compile(r"\"([^\"]+)\", ,\"([^\"]+)\",([^,]+),([0-9]
 re_kazoe_single_module = re.compile(r"\"([^\"]+)\",\"([^\"]+)\",([^,]+),([0-9]+),([0-9]+),([0-9\.]+)")
 re_kazoe_total         = re.compile(r"全ステップ数,\s*,\s*,\s*,([0-9]+),([0-9]+),([0-9]+),([0-9]+),([0-9]+)")
 re_kazoe_single_total  = re.compile(r"全ステップ数,\s*,\s*,([0-9]+),([0-9]+),([0-9\.]+)")
-
+re_cell_invalid_chr    = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
 
 #/*****************************************************************************/
 #/* コミットログの中のファイル単位の情報の保持クラス                          */
@@ -430,6 +434,8 @@ def check_command_line_option():
     global g_kazoe_only
     global g_out_cas_file
     global g_kazoe_history
+    global g_target_paths
+    global g_except_paths
 
     argc = len(sys.argv)
     option = ""
@@ -459,6 +465,12 @@ def check_command_line_option():
         elif (option == "k"):
             g_kazoe_path = arg
             option = ""
+        elif (option == "t"):
+            g_target_paths.add(arg)
+            option = ""
+        elif (option == "e"):
+            g_except_paths.add(arg)
+            option = ""
         elif (arg == "--stop-on-copy"):
             g_stop_on_copy = 1
         elif (arg == "-f") or (arg == "--fullpath"):
@@ -471,6 +483,10 @@ def check_command_line_option():
             option = "k"
         elif (arg == "-o"):
             option = "o"
+        elif (arg == "-e"):
+            option = "e"
+        elif (arg == "-t"):
+            option = "t"
         elif (arg == "-ko"):
             g_kazoe_only = 1
         elif (g_path1 == ""):
@@ -930,6 +946,7 @@ def check_ws_exists(wb, sheet_name):
 
     return False
 
+
 #/*****************************************************************************/
 #/* セルのテキスト検索                                                        */
 #/*****************************************************************************/
@@ -964,9 +981,11 @@ def out_kazoe_history():
         ws.cell(6, col).value = "Author"
         ws.cell(7, col).value = "Comment"
         ws.cell(8, col).value = "全体"
+        ws.cell(9, col).value = "変更ファイル"
 
         rev_count         = 0
         max_comment_count = 1
+        max_line_count    = 1
         max_file_name     = 9
         file_with_modules = set()
 
@@ -994,9 +1013,12 @@ def out_kazoe_history():
                 else:
                     comment += "\n" + comment_line
                     comment_count += 1
-            ws.cell(7, col + (rev_count * 3) + 1).value = comment
+            try:
+                ws.cell(7, col + (rev_count * 3) + 1).value = comment
+            except openpyxl.utils.exceptions.IllegalCharacterError as exception:
+                ws.cell(7, col + (rev_count * 3) + 1).value = "例外発生"
             if (comment_count > max_comment_count):
-                ws.row_dimensions[7].height = comment_count * 18
+                ws.row_dimensions[7].height = comment_count * const_row_heigt
                 max_comment_count = comment_count
 
             #/* 全体のステップ数（新規＋変更、削除、実ステップ）を出力 */
@@ -1005,8 +1027,9 @@ def out_kazoe_history():
             ws.cell(8, col + (rev_count * 3) + 3).value = rslt.total_steps.real_steps
 
             #/* ファイル単位のステップ数出力 */
+            changed_files = []
             for file_rslt in rslt.files:
-                row = find_row(ws, col, 9, file_rslt.file_name)
+                row = find_row(ws, col, 10, file_rslt.file_name)
                 ws.cell(row, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
                 ws.cell(row, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
                 ws.cell(row, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
@@ -1014,7 +1037,12 @@ def out_kazoe_history():
                 #/* 最長ファイル名の長さに合わせてB列幅を調整 */
                 if (len(file_rslt.file_name) > max_file_name):
                     max_file_name = len(file_rslt.file_name)
-                    ws.column_dimensions['B'].width = max_file_name * 1
+                    ws.column_dimensions['B'].width = max_file_name * const_col_width
+
+                #/* 変更のあったファイル名をピックアップ */
+                if ((file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps + file_rslt.file_steps.del_steps) > 0):
+                    changed_file = os.path.basename(file_rslt.file_name)
+                    changed_files.append(changed_file)
 
                 #/* 複数モジュールを持つファイルをピックアップしておく */
                 if (len(file_rslt.modules) > 1):
@@ -1022,6 +1050,23 @@ def out_kazoe_history():
                     file_with_modules.add(file_rslt.file_name)
                     if (len(file_with_modules) > length_before):
                         print("add file with modules [%s] in Rev.%d" % (file_rslt.file_name, rslt.commit_log.revision))
+
+            #/* セル結合して変更のあったモジュールの出力 */
+            ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+            changed = ""
+            line_count = 1
+            for changed_file in changed_files:
+                if (changed == ""):
+                    changed = changed_file
+                else:
+                    changed += "\n" + changed_file
+                    line_count += 1
+            ws.cell(9, col + (rev_count * 3) + 1).value = changed
+
+            if (line_count > max_line_count):
+                ws.row_dimensions[9].height = line_count * const_row_heigt
+                max_line_count = line_count
 
             rev_count += 1
 
@@ -1053,8 +1098,8 @@ def out_kazoe_history():
 
             rev_count         = 0
             max_comment_count = 1
-            max_file_name     = 9
             max_line_count    = 1
+            max_file_name     = 9
 
             #/* ファイル単位のステップカウント履歴を作成 */
             for rslt in g_kazoe_history.rslts:
@@ -1080,9 +1125,13 @@ def out_kazoe_history():
                     else:
                         comment += "\n" + comment_line
                         comment_count += 1
-                ws.cell(7, col + (rev_count * 3) + 1).value = comment
+                re_cell_invalid_chr.sub(" ", comment)
+                try:
+                    ws.cell(7, col + (rev_count * 3) + 1).value = comment
+                except openpyxl.utils.exceptions.IllegalCharacterError as exception:
+                    ws.cell(7, col + (rev_count * 3) + 1).value = "例外発生"
                 if (comment_count > max_comment_count):
-                    ws.row_dimensions[7].height = comment_count * 18
+                    ws.row_dimensions[7].height = comment_count * const_row_heigt
                     max_comment_count = comment_count
 
                 changed_functions = []
@@ -1103,19 +1152,17 @@ def out_kazoe_history():
                             #/* 最長モジュール名の長さに合わせてB列幅を調整 */
                             if (len(module_rslt.module_name) > max_file_name):
                                 max_file_name = len(module_rslt.module_name)
-                                ws.column_dimensions['B'].width = max_file_name * 1
+                                ws.column_dimensions['B'].width = max_file_name * const_col_width
 
                             #/* 変更のあったモジュール（関数）をピックアップ(ついで末尾の節だけを拾って、型情報とかはそぎ落とす) */
                             if ((module_rslt.steps.new_steps + module_rslt.steps.mod_steps + module_rslt.steps.del_steps) > 0):
                                 changed_function = module_rslt.module_name.split(" ")[-1]
                                 changed_functions.append(changed_function)
 
-                #/* セル結合してコメントを出力 */
+                #/* セル結合して変更のあったモジュールの出力 */
                 ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
                 ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
                 changed = ""
-
-                #/* 変更のあったモジュールの出力 */
                 line_count = 1
                 for changed_function in changed_functions:
                     if (changed == ""):
@@ -1126,7 +1173,7 @@ def out_kazoe_history():
                 ws.cell(9, col + (rev_count * 3) + 1).value = changed
 
                 if (line_count > max_line_count):
-                    ws.row_dimensions[9].height = line_count * 18
+                    ws.row_dimensions[9].height = line_count * const_row_heigt
                     max_line_count = line_count
 
                 rev_count += 1
