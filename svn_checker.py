@@ -17,7 +17,7 @@ from openpyxl.styles import Alignment
 import difflib
 
 
-const_row_heigt = 12
+const_row_heigt = 8
 const_col_width = 1
 
 
@@ -333,7 +333,7 @@ def log_settings():
         now = datetime.datetime.now()
         formatted_time = now.strftime("%Y%m%d_%H%M%S")
         log_path = g_out_path + "\\svn_checker_" + formatted_time + ".log";
-        g_out_xlsx_file = g_out_path + "\\svn_checker_" + formatted_time + ".xslx";
+        g_out_xlsx_file = g_out_path + "\\svn_checker_" + formatted_time + ".xlsx";
 
     print ("log_path : %s" % log_path)
 
@@ -1009,7 +1009,7 @@ def out_kazoe_history():
 
             #/* セル結合してコメントを出力 */
             ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-            ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+            ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
             comment = ""
             comment_count = 1
             for comment_line in rslt.commit_log.comments:
@@ -1058,7 +1058,7 @@ def out_kazoe_history():
 
             #/* セル結合して変更のあったモジュールの出力 */
             ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-            ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+            ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
             changed = ""
             line_count = 1
             for changed_file in changed_files:
@@ -1121,7 +1121,7 @@ def out_kazoe_history():
 
                 #/* セル結合してコメントを出力 */
                 ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-                ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+                ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
                 comment = ""
                 comment_count = 1
                 for comment_line in rslt.commit_log.comments:
@@ -1166,7 +1166,7 @@ def out_kazoe_history():
 
                 #/* セル結合して変更のあったモジュールの出力 */
                 ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-                ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top")
+                ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
                 changed = ""
                 line_count = 1
                 for changed_function in changed_functions:
