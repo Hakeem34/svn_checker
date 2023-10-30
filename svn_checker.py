@@ -44,7 +44,7 @@ g_patch_mode        = 0
 
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
-g_out_cas_file      = 1
+g_out_cas_file      = 0
 g_kazoe_only        = 0
 g_out_xlsx_file     = ""
 g_kazoe_history     = None
@@ -76,18 +76,19 @@ class cChangeFile:
 #/*****************************************************************************/
 class cCommitLog:
     def __init__(self):
-        self.revision = 0
-        self.author   = ""
-        self.year     = 0
-        self.month    = 0
-        self.day      = 0
-        self.hour     = 0
-        self.minute   = 0
-        self.second   = 0
-        self.line     = 0
-        self.refs     = []
-        self.comments = []
-        self.changes  = []
+        self.revision   = 0
+        self.author     = ""
+        self.year       = 0
+        self.month      = 0
+        self.day        = 0
+        self.hour       = 0
+        self.minute     = 0
+        self.second     = 0
+        self.line       = 0
+        self.refs       = []
+        self.comments   = []
+        self.changes    = []
+        self.all_in_tgt = 0
         return
 
     #/* コミットログの内容出力 */
@@ -338,8 +339,8 @@ def log_settings():
     print ("log_path : %s" % log_path)
 
     if (log_path != ""):
-       log_file = open(log_path, "a")
-       sys.stdout = log_file
+        log_file = open(log_path, "a")
+        sys.stdout = log_file
 
     now = datetime.datetime.now()
     print("start checking : " + str(now))
@@ -381,7 +382,7 @@ def make_directory(path):
     return
 
 #/*****************************************************************************/
-#/* ディレクトリ作成                                                          */
+#/* ディレクトリコピー                                                        */
 #/*****************************************************************************/
 def force_copy_directory(src_path, dst_path):
     if os.path.exists(dst_path):
@@ -446,7 +447,7 @@ def check_command_line_option():
     option = ""
 
     if (argc == 1):
-        print("usage ; svn_checker.py")
+        print("usage : svn_checker.py")
         exit(-1)
 
     sys.argv.pop(0)
@@ -876,18 +877,23 @@ def output_log_files(path_log, commit_log, pre_revision):
     else:
         #/* 2回目以降のRevisionに対しては、svn diffによるPatchを取得して、Patchを当てていくことで高速化する */
         force_copy_directory(pre_path, rev_path)
-        out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
-        diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
-        print(diff_cmd)
-        lines = cmd_execute(diff_cmd, out_diff, "")
-        print(lines)
-        if (g_full_path):
-            patch_cmd = "patch -d " + export_path + g_repo_info.relative_dir + " -p0"
-        else:
-            patch_cmd = "patch -d " + export_path + " -p0"
-        print(patch_cmd)
-        lines = cmd_execute(patch_cmd, "", out_diff)
-        os.remove(out_diff)
+#       diff_ex_cmd = 'python svn_diff_ex.py -o ' + export_path + ' -ro -r ' + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
+        diff_ex_cmd = 'python svn_diff_ex.py -o ' + export_path + ' -ro -r ' + str(commit_log.revision - 1) + ":" + str(commit_log.revision) + " " + g_repo_info.url
+        print(diff_ex_cmd)
+        lines = cmd_execute(diff_ex_cmd, "", "")
+
+#       out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
+#       diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
+#       print(diff_cmd)
+#       lines = cmd_execute(diff_cmd, out_diff, "")
+#       print(lines)
+#       if (g_full_path):
+#           patch_cmd = "patch -d " + export_path + g_repo_info.relative_dir + " -p0"
+#       else:
+#           patch_cmd = "patch -d " + export_path + " -p0"
+#       print(patch_cmd)
+#       lines = cmd_execute(patch_cmd, "", out_diff)
+#       os.remove(out_diff)
 
     #/* かぞえチャオ自動実行 */
     output_cas_text(commit_log, pre_revision, rev_path, pre_path + "/export", export_path)
@@ -905,6 +911,7 @@ def output_path_files():
     global g_path_logs
     global g_out_path
     global g_full_path
+    global g_patch_mode
 
     pre_revision = 0
     make_directory(g_out_path)
@@ -913,14 +920,26 @@ def output_path_files():
             print("target : %s" % target)
 
         for log in path_log.logs:
-#           print("log for rev : %d" % log.revision)
+            print("log for rev : %d" % log.revision)
+            g_patch_mode = 1
+            exec = 0
             for changed in log.changes:
-                if (changed.external == 0):
-#                   print("hit on rev %d" % log.revision)
-                    if (is_path_in_target(changed.path)):
-                        output_log_files(path_log, log, pre_revision)
-                        pre_revision = log.revision
-                        break
+                if (changed.external == 1):
+                    #/* 外部のファイルが含まれていたらPatchモード不可 */
+                    print("disable patch mode1! for Rev.%d" % log.revision)
+                    g_patch_mode = 0
+                elif (is_path_in_target(changed.path)):
+                    #/* ターゲットのファイルが一つでもあれば、出力する */
+                    print("exec output log! for Rev.%d" % log.revision)
+                    exec = 1
+                else:
+                    #/* 対象外のファイルが含まれていたらPatchモード不可 */
+                    print("disable patch mode2! for Rev.%d" % log.revision)
+                    g_patch_mode = 0
+
+            if (exec):
+                output_log_files(path_log, log, pre_revision)
+                pre_revision = log.revision
 
     return
 

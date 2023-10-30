@@ -21,6 +21,7 @@ g_right_path    = ""
 g_temp_cmd_name = "_svn_diff_ex.bat"
 g_out_timestamp = ""
 g_out_path      = ""
+g_right_only    = 0
 
 re_nonexistent  = re.compile(r"^(.+)\s+\(nonexistent\)$")
 re_working_copy = re.compile(r"^(.+)\s+\(working copy\)$")
@@ -49,11 +50,13 @@ def check_command_line_option():
     global g_right_path
     global g_out_timestamp
     global g_out_path
+    global g_right_only
 
     argc = len(sys.argv)
     option = ""
 
     sys.argv.pop(0)
+    count = 0
     for arg in sys.argv:
         if (option == "r"):
             if (result := re.match(r"([0-9]+):([0-9]+)", arg)):
@@ -66,12 +69,21 @@ def check_command_line_option():
                 print("svn_diff_ex.py : invalid revision!")
                 exit(-1)
             option = ""
+        elif (option == "o"):
+            g_out_path = arg
+            option = ""
         elif (arg == "-t") or (arg == "--timestamp"):
             now = datetime.datetime.now()
             g_out_timestamp = now.strftime("%Y%m%d_%H%M%S")
         elif (arg == "-r") or (arg == "--revision"):
             option = "r"
+        elif (arg == "-o") or (arg == "--outpath"):
+            option = "o"
+        elif (arg == "-ro") or (arg == "--rightonly"):
+            count += 1
+            g_right_only = 1
         elif (arg == "-svn"):
+            count += 1
             g_diff_mode = 1
 #           print("svn_diff_ex.py : svn mode! os.getcwd():%s" % (os.getcwd()))
 #           print("sys.argv[1] : %s" % sys.argv[1])
@@ -79,11 +91,11 @@ def check_command_line_option():
 #           print("sys.argv[3] : %s" % sys.argv[3])
 #           print("sys.argv[4] : %s" % sys.argv[4])
 #           print("sys.argv[5] : %s" % sys.argv[5])
-            g_out_path    = sys.argv.pop(1)
-            g_left_label  = sys.argv.pop(1)
-            g_right_label = sys.argv.pop(1)
-            g_left_path   = sys.argv.pop(1)
-            g_right_path  = sys.argv.pop(1)
+            g_out_path    = sys.argv.pop(count)
+            g_left_label  = sys.argv.pop(count)
+            g_right_label = sys.argv.pop(count)
+            g_left_path   = sys.argv.pop(count)
+            g_right_path  = sys.argv.pop(count)
             return
         elif (g_target_path == ""):
             g_target_path = arg
@@ -143,7 +155,12 @@ def make_directory(path):
 #/*****************************************************************************/
 def create_temp_cmd_file(out_path):
     global g_temp_cmd_name
-    this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -svn \"" + out_path + "\" %3 %5 %6 %7"
+    global g_right_only
+
+    if (g_right_only):
+        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -ro -svn \"" + out_path + "\" %3 %5 %6 %7"
+    else:
+        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -svn \"" + out_path + "\" %3 %5 %6 %7"
     
     with open(g_temp_cmd_name, "w") as outfile:
         print(r"echo OFF", file = outfile)
@@ -180,15 +197,20 @@ def get_diff_mode():
     right_label_info = get_attribute(g_right_label)
 
     left_out_path = g_out_path + "\\01_before\\" + os.path.dirname(left_label_info.file_name)
-    right_out_path = g_out_path + "\\02_after\\" + os.path.dirname(left_label_info.file_name)
+
+    if (g_right_only == 0):
+        right_out_path = g_out_path + "\\02_after\\" + os.path.dirname(left_label_info.file_name)
+    else:
+        right_out_path = g_out_path + "\\" + os.path.dirname(left_label_info.file_name)
+
 #   print("Left  Out Path  : %s" % left_out_path)
 #   print("Right Out Path  : %s" % right_out_path)
-    make_directory(left_out_path)
+    if (g_right_only == 0):
+        make_directory(left_out_path)
+        if (left_label_info.revision != -1):
+            shutil.copy2(g_left_path,  left_out_path  + "\\" + os.path.basename(left_label_info.file_name))
+
     make_directory(right_out_path)
-
-    if (left_label_info.revision != -1):
-        shutil.copy2(g_left_path,  left_out_path  + "\\" + os.path.basename(left_label_info.file_name))
-
     if (right_label_info.revision != -1):
         shutil.copy2(g_right_path, right_out_path + "\\" + os.path.basename(right_label_info.file_name))
 
@@ -224,30 +246,38 @@ def get_attribute(label):
 #/* 出力先パス決定                                                            */
 #/*****************************************************************************/
 def set_output_path(target_path):
-    this_path = os.getcwd()
+    global g_out_path
 
-    if (g_out_timestamp != ""):
-        out_path = this_path + '\diff_export_' + g_out_timestamp
+    if (g_out_path != ""):
+        if (g_out_timestamp != ""):
+            out_path = g_out_path + '_' + g_out_timestamp
+        else:
+            out_path = g_out_path
     else:
-        out_path = this_path + '\diff_export'
+        this_path = os.getcwd()
 
-    #/* WorkingCopyの差分抽出の場合、.svnフォルダを探索する */
-    if (target_path == ""):
-        while(this_path != ""):
-            if (os.path.isdir(this_path + '\.svn')):
-                if (g_out_timestamp != ""):
-                    out_path = os.path.dirname(this_path) + '\diff_export_' + g_out_timestamp
-                else:
-                    out_path = os.path.dirname(this_path) + '\diff_export'
+        if (g_out_timestamp != ""):
+            out_path = this_path + '\\' + g_out_path + '_' + g_out_timestamp
+        else:
+            out_path = this_path + '\\' + g_out_path
 
-                print("found .svn in %s to %s" % (this_path, out_path))
-                break
+        #/* WorkingCopyの差分抽出の場合、.svnフォルダを探索する */
+        if (target_path == ""):
+            while(this_path != ""):
+                if (os.path.isdir(this_path + '\.svn')):
+                    if (g_out_timestamp != ""):
+                        out_path = os.path.dirname(this_path) + '\\' + g_out_path + '_' + g_out_timestamp
+                    else:
+                        out_path = os.path.dirname(this_path) + '\\' + g_out_path
 
-            print("not found .svn in %s" % this_path)
-            if (this_path == os.path.dirname(this_path)):
-                break
+                    print("found .svn in %s to %s" % (this_path, out_path))
+                    break
 
-            this_path = os.path.dirname(this_path)
+                print("not found .svn in %s" % this_path)
+                if (this_path == os.path.dirname(this_path)):
+                    break
+
+                this_path = os.path.dirname(this_path)
 
     print("out path %s" % out_path)
     return out_path
