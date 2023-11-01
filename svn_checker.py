@@ -44,7 +44,7 @@ g_patch_mode        = 0
 
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
-g_out_cas_file      = 0
+g_out_cas_file      = 1
 g_kazoe_only        = 0
 g_out_xlsx_file     = ""
 g_kazoe_history     = None
@@ -688,6 +688,9 @@ def clean_ciao_rslt(target_path):
             if (result := re.match(r"^ciao_rslt[0-9]+_[0-9]+.csv",filename)):
                 print("remove ciao rslt file : %s" % (target_path + "\\" + filename))
                 os.remove(target_path + "\\" + filename)
+            elif (result := re.match(r"^ciao_rslt_r[0-9]+_r[0-9]+.csv",filename)):
+                print("remove ciao rslt file : %s" % (target_path + "\\" + filename))
+                os.remove(target_path + "\\" + filename)
 
     return
 
@@ -1126,6 +1129,7 @@ def out_kazoe_history():
             max_file_name     = 9
 
             #/* ファイル単位のステップカウント履歴を作成 */
+            col = 3
             for rslt in g_kazoe_history.rslts:
 
                 #/* セル結合してリビジョンを出力 */
@@ -1168,7 +1172,7 @@ def out_kazoe_history():
 
                         #/* モジュール（関数）単位のステップ数出力 */
                         for module_rslt in file_rslt.modules:
-                            row = find_row(ws, col, 10, module_rslt.module_name)
+                            row = find_row(ws, 2, 10, module_rslt.module_name)
                             ws.cell(row, col + (rev_count * 3) + 1).value = module_rslt.steps.new_steps + module_rslt.steps.mod_steps
                             ws.cell(row, col + (rev_count * 3) + 2).value = module_rslt.steps.del_steps
                             ws.cell(row, col + (rev_count * 3) + 3).value = module_rslt.steps.real_steps
@@ -1182,6 +1186,10 @@ def out_kazoe_history():
                             if ((module_rslt.steps.new_steps + module_rslt.steps.mod_steps + module_rslt.steps.del_steps) > 0):
                                 changed_function = module_rslt.module_name.split(" ")[-1]
                                 changed_functions.append(changed_function)
+
+                                #/* 最後に更新されたRevを記憶 */
+                                ws.cell(row, 3).value = rslt.commit_log.revision
+
 
                 #/* セル結合して変更のあったモジュールの出力 */
                 ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
