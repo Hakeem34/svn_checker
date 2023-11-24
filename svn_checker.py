@@ -113,6 +113,7 @@ class cCommitLog:
 
     #/* コミットログの内容読み込み */
     def input_log_text(self, target_path):
+#       print("input_log_text start!")
         file_path = target_path + "/commit_log.txt"
 
         read_file = open(file_path, 'r')
@@ -127,10 +128,11 @@ class cCommitLog:
                 self.year     = int(result.group(1))
                 self.month    = int(result.group(2))
                 self.day      = int(result.group(3))
-            elif (result := re.match(r"Time     : ([0-9]+)\/([0-9]+)\/([0-9]+)", line)):
+            elif (result := re.match(r"Time     : ([0-9]+)\:([0-9]+)\:([0-9]+)", line)):
                 self.hour     = int(result.group(1))
                 self.minute   = int(result.group(2))
                 self.second   = int(result.group(3))
+ #              print("input_log_text HH:MM:SS = %02d:%02d:%02d" % (self.hour, self.minute, self.second))
             elif (result := re.match(r"Comment  : ([^\n]+)", line)):
                 self.comments.append(result.group(1))
         return
@@ -1002,13 +1004,14 @@ def out_kazoe_history():
         ws.title = "ファイル履歴"
 
         col = 2
-        ws.cell(2, col).value = g_kazoe_history.url
-        ws.cell(3, col).value = r"Rev." + str(g_kazoe_history.first_rev) + r" - " + r"Rev." + str(g_kazoe_history.last_rev)
-        ws.cell(5, col).value = "Revision"
-        ws.cell(6, col).value = "Author"
-        ws.cell(7, col).value = "Comment"
-        ws.cell(8, col).value = "全体"
-        ws.cell(9, col).value = "変更ファイル"
+        ws.cell(2, col).value  = g_kazoe_history.url
+        ws.cell(3, col).value  = r"Rev." + str(g_kazoe_history.first_rev) + r" - " + r"Rev." + str(g_kazoe_history.last_rev)
+        ws.cell(5, col).value  = "Revision"
+        ws.cell(6, col).value  = "Date Time"
+        ws.cell(7, col).value  = "Author"
+        ws.cell(8, col).value  = "Comment"
+        ws.cell(9, col).value  = "全体"
+        ws.cell(10, col).value = "変更ファイル"
 
         rev_count         = 0
         max_comment_count = 1
@@ -1024,14 +1027,19 @@ def out_kazoe_history():
             ws.cell(5, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
             ws.cell(5, col + (rev_count * 3) + 1).value = rslt.commit_log.revision
 
-            #/* セル結合してAuthorを出力 */
+            #/* セル結合してDate Timeを出力 */
             ws.merge_cells(start_row= 6, end_row=6, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
             ws.cell(6, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
-            ws.cell(6, col + (rev_count * 3) + 1).value = rslt.commit_log.author
+            ws.cell(6, col + (rev_count * 3) + 1).value = str(rslt.commit_log.year) + "/" + str(rslt.commit_log.month) + "/" + str(rslt.commit_log.day) + "  " + str(rslt.commit_log.hour) + ":" + str(rslt.commit_log.minute) + ":" + str(rslt.commit_log.second)
+
+            #/* セル結合してAuthorを出力 */
+            ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+            ws.cell(7, col + (rev_count * 3) + 1).value = rslt.commit_log.author
 
             #/* セル結合してコメントを出力 */
-            ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-            ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
+            ws.merge_cells(start_row= 8, end_row=8, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(8, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
             comment = ""
             comment_count = 1
             for comment_line in rslt.commit_log.comments:
@@ -1041,22 +1049,22 @@ def out_kazoe_history():
                     comment += "\n" + comment_line
                     comment_count += 1
             try:
-                ws.cell(7, col + (rev_count * 3) + 1).value = comment
+                ws.cell(8, col + (rev_count * 3) + 1).value = comment
             except openpyxl.utils.exceptions.IllegalCharacterError as exception:
-                ws.cell(7, col + (rev_count * 3) + 1).value = "例外発生"
+                ws.cell(8, col + (rev_count * 3) + 1).value = "例外発生"
             if (comment_count > max_comment_count):
-                ws.row_dimensions[7].height = comment_count * const_row_heigt
+                ws.row_dimensions[8].height = comment_count * const_row_heigt
                 max_comment_count = comment_count
 
             #/* 全体のステップ数（新規＋変更、削除、実ステップ）を出力 */
-            ws.cell(8, col + (rev_count * 3) + 1).value = rslt.total_steps.new_steps + rslt.total_steps.mod_steps
-            ws.cell(8, col + (rev_count * 3) + 2).value = rslt.total_steps.del_steps
-            ws.cell(8, col + (rev_count * 3) + 3).value = rslt.total_steps.real_steps
+            ws.cell(9, col + (rev_count * 3) + 1).value = rslt.total_steps.new_steps + rslt.total_steps.mod_steps
+            ws.cell(9, col + (rev_count * 3) + 2).value = rslt.total_steps.del_steps
+            ws.cell(9, col + (rev_count * 3) + 3).value = rslt.total_steps.real_steps
 
             #/* ファイル単位のステップ数出力 */
             changed_files = []
             for file_rslt in rslt.files:
-                row = find_row(ws, col, 10, file_rslt.file_name)
+                row = find_row(ws, col, 11, file_rslt.file_name)
                 ws.cell(row, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
                 ws.cell(row, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
                 ws.cell(row, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
@@ -1079,8 +1087,8 @@ def out_kazoe_history():
                         print("add file with modules [%s] in Rev.%d" % (file_rslt.file_name, rslt.commit_log.revision))
 
             #/* セル結合して変更のあったモジュールの出力 */
-            ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-            ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
+            ws.merge_cells(start_row= 10, end_row=10, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+            ws.cell(10, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
             changed = ""
             line_count = 1
             for changed_file in changed_files:
@@ -1089,7 +1097,7 @@ def out_kazoe_history():
                 else:
                     changed += "\n" + changed_file
                     line_count += 1
-            ws.cell(9, col + (rev_count * 3) + 1).value = changed
+            ws.cell(10, col + (rev_count * 3) + 1).value = changed
 
             if (line_count > max_line_count):
                 ws.row_dimensions[9].height = line_count * const_row_heigt
@@ -1118,10 +1126,11 @@ def out_kazoe_history():
             ws.cell(2, col).value = file_with_module
             ws.cell(3, col).value = r"Rev." + str(g_kazoe_history.first_rev) + r" - " + r"Rev." + str(g_kazoe_history.last_rev)
             ws.cell(5, col).value = "Revision"
-            ws.cell(6, col).value = "Author"
-            ws.cell(7, col).value = "Comment"
-            ws.cell(8, col).value = "全体"
-            ws.cell(9, col).value = "変更関数"
+            ws.cell(6, col).value = "Date Time"
+            ws.cell(7, col).value = "Author"
+            ws.cell(8, col).value = "Comment"
+            ws.cell(9, col).value = "全体"
+            ws.cell(10, col).value = "変更関数"
 
             rev_count         = 0
             max_comment_count = 1
@@ -1137,14 +1146,19 @@ def out_kazoe_history():
                 ws.cell(5, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
                 ws.cell(5, col + (rev_count * 3) + 1).value = rslt.commit_log.revision
 
-                #/* セル結合してAuthorを出力 */
+                #/* セル結合してDate Timeを出力 */
                 ws.merge_cells(start_row= 6, end_row=6, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
                 ws.cell(6, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
-                ws.cell(6, col + (rev_count * 3) + 1).value = rslt.commit_log.author
+                ws.cell(6, col + (rev_count * 3) + 1).value = str(rslt.commit_log.year) + "/" + str(rslt.commit_log.month) + "/" + str(rslt.commit_log.day) + "  " + str(rslt.commit_log.hour) + ":" + str(rslt.commit_log.minute) + ":" + str(rslt.commit_log.second)
+
+                #/* セル結合してAuthorを出力 */
+                ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left")
+                ws.cell(7, col + (rev_count * 3) + 1).value = rslt.commit_log.author
 
                 #/* セル結合してコメントを出力 */
-                ws.merge_cells(start_row= 7, end_row=7, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-                ws.cell(7, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
+                ws.merge_cells(start_row= 8, end_row=8, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(8, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
                 comment = ""
                 comment_count = 1
                 for comment_line in rslt.commit_log.comments:
@@ -1155,24 +1169,24 @@ def out_kazoe_history():
                         comment_count += 1
                 re_cell_invalid_chr.sub(" ", comment)
                 try:
-                    ws.cell(7, col + (rev_count * 3) + 1).value = comment
+                    ws.cell(8, col + (rev_count * 3) + 1).value = comment
                 except openpyxl.utils.exceptions.IllegalCharacterError as exception:
-                    ws.cell(7, col + (rev_count * 3) + 1).value = "例外発生"
+                    ws.cell(8, col + (rev_count * 3) + 1).value = "例外発生"
                 if (comment_count > max_comment_count):
-                    ws.row_dimensions[7].height = comment_count * const_row_heigt
+                    ws.row_dimensions[8].height = comment_count * const_row_heigt
                     max_comment_count = comment_count
 
                 changed_functions = []
                 for file_rslt in rslt.files:
                     if (file_rslt.file_name == file_with_module):
                         #/* 全体のステップ数（新規＋変更、削除、実ステップ）を出力 */
-                        ws.cell(8, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
-                        ws.cell(8, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
-                        ws.cell(8, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
+                        ws.cell(9, col + (rev_count * 3) + 1).value = file_rslt.file_steps.new_steps + file_rslt.file_steps.mod_steps
+                        ws.cell(9, col + (rev_count * 3) + 2).value = file_rslt.file_steps.del_steps
+                        ws.cell(9, col + (rev_count * 3) + 3).value = file_rslt.file_steps.real_steps
 
                         #/* モジュール（関数）単位のステップ数出力 */
                         for module_rslt in file_rslt.modules:
-                            row = find_row(ws, 2, 10, module_rslt.module_name)
+                            row = find_row(ws, 2, 11, module_rslt.module_name)
                             ws.cell(row, col + (rev_count * 3) + 1).value = module_rslt.steps.new_steps + module_rslt.steps.mod_steps
                             ws.cell(row, col + (rev_count * 3) + 2).value = module_rslt.steps.del_steps
                             ws.cell(row, col + (rev_count * 3) + 3).value = module_rslt.steps.real_steps
@@ -1192,8 +1206,8 @@ def out_kazoe_history():
 
 
                 #/* セル結合して変更のあったモジュールの出力 */
-                ws.merge_cells(start_row= 9, end_row=9, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
-                ws.cell(9, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
+                ws.merge_cells(start_row= 10, end_row=10, start_column=col + (rev_count * 3) + 1, end_column=col + (rev_count * 3) + 3)
+                ws.cell(10, col + (rev_count * 3) + 1).alignment = Alignment(horizontal="left", vertical="top", wrapText=True)
                 changed = ""
                 line_count = 1
                 for changed_function in changed_functions:
@@ -1202,7 +1216,7 @@ def out_kazoe_history():
                     else:
                         changed += "\n" + changed_function
                         line_count += 1
-                ws.cell(9, col + (rev_count * 3) + 1).value = changed
+                ws.cell(10, col + (rev_count * 3) + 1).value = changed
 
                 if (line_count > max_line_count):
                     ws.row_dimensions[9].height = line_count * const_row_heigt
