@@ -164,13 +164,14 @@ def create_temp_cmd_file(out_path):
     
     with open(g_temp_cmd_name, "w") as outfile:
         print(r"echo OFF", file = outfile)
-#       print(r"echo %1", file = outfile)
-#       print(r"echo %2", file = outfile)
-#       print(r"echo %3", file = outfile)
-#       print(r"echo %4", file = outfile)
-#       print(r"echo %5", file = outfile)
-#       print(r"echo %6", file = outfile)
-#       print(r"echo %7", file = outfile)
+#       print(r"echo [1]%1", file = outfile)
+#       print(r"echo [2]%2", file = outfile)
+#       print(r"echo [3]%3", file = outfile)
+#       print(r"echo [4]%4", file = outfile)
+#       print(r"echo [5]%5", file = outfile)
+#       print(r"echo [6]%6", file = outfile)
+#       print(r"echo [7]%7", file = outfile)
+#       print(r"echo ON", file = outfile)
         print(this_path, file = outfile)
         outfile.close
 
@@ -254,6 +255,7 @@ def set_output_path(target_path):
         else:
             out_path = g_out_path
     else:
+        g_out_path = 'diff_export'
         this_path = os.getcwd()
 
         if (g_out_timestamp != ""):
