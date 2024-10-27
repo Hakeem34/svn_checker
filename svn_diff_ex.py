@@ -19,6 +19,7 @@ g_right_label   = ""
 g_left_path     = ""
 g_right_path    = ""
 g_temp_cmd_name = "_svn_diff_ex.bat"
+g_opt_ts        = 1
 g_out_timestamp = ""
 g_out_path      = ""
 g_right_only    = 0
@@ -51,6 +52,7 @@ def check_command_line_option():
     global g_out_timestamp
     global g_out_path
     global g_right_only
+    global g_opt_ts
 
     argc = len(sys.argv)
     option = ""
@@ -73,8 +75,9 @@ def check_command_line_option():
             g_out_path = arg
             option = ""
         elif (arg == "-t") or (arg == "--timestamp"):
-            now = datetime.datetime.now()
-            g_out_timestamp = now.strftime("%Y%m%d_%H%M%S")
+            g_opt_ts = 1
+        elif (arg == "-nt") or (arg == "--no_timestamp"):
+            g_opt_ts = 0
         elif (arg == "-r") or (arg == "--revision"):
             option = "r"
         elif (arg == "-o") or (arg == "--outpath"):
@@ -92,6 +95,7 @@ def check_command_line_option():
 #           print("sys.argv[4] : %s" % sys.argv[4])
 #           print("sys.argv[5] : %s" % sys.argv[5])
             g_out_path    = sys.argv.pop(count)
+            g_target_path = sys.argv.pop(count)
             g_left_label  = sys.argv.pop(count)
             g_right_label = sys.argv.pop(count)
             g_left_path   = sys.argv.pop(count)
@@ -105,12 +109,18 @@ def check_command_line_option():
 
     if (g_target_path == ""):
         print("export working copy diff!")
+    elif (os.path.isdir(g_target_path)):
+        print("export working copy diff! from [%s]" % g_target_path)
     else:
         if ((g_revision1 == "") or (g_revision2 == "")):
             print("svn_diff_ex.py : no target revisions!")
             exit(-1)
 
         print("export diff between r%s:r%s from %s" % (g_revision1, g_revision2, g_target_path))
+
+    if (g_opt_ts):
+        now = datetime.datetime.now()
+        g_out_timestamp = now.strftime("%Y%m%d_%H%M%S")
 
     return
 
@@ -153,14 +163,14 @@ def make_directory(path):
 #/*****************************************************************************/
 #/* svnのdiff_cmdから呼び出される実行ファイルの生成                           */
 #/*****************************************************************************/
-def create_temp_cmd_file(out_path):
+def create_temp_cmd_file(out_path, target_path):
     global g_temp_cmd_name
     global g_right_only
 
     if (g_right_only):
-        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -ro -svn \"" + out_path + "\" %3 %5 %6 %7"
+        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -ro -svn \"" + out_path + "\" \"" + target_path + "\" %3 %5 %6 %7"
     else:
-        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -svn \"" + out_path + "\" %3 %5 %6 %7"
+        this_path = "python " + os.getcwd() + "\\" + "svn_diff_ex.py -svn \"" + out_path + "\" \"" + target_path + "\" %3 %5 %6 %7"
     
     with open(g_temp_cmd_name, "w") as outfile:
         print(r"echo OFF", file = outfile)
@@ -175,7 +185,7 @@ def create_temp_cmd_file(out_path):
         print(this_path, file = outfile)
         outfile.close
 
-    return this_path
+    return
 
 
 #/*****************************************************************************/
@@ -187,15 +197,19 @@ def get_diff_mode():
     global g_left_path
     global g_right_path
     global g_out_path
+    global g_target_path
 
-    print("Left  Label : %s" % g_left_label)
-    print("Right Label : %s" % g_right_label)
-    print("Left  Path  : %s" % g_left_path)
-    print("Rigth Path  : %s" % g_right_path)
-    print("Out   Path  : %s" % g_out_path)
+    print("Left   Label   : %s" % g_left_label)
+    print("Right  Label   : %s" % g_right_label)
+    print("Left   Path    : %s" % g_left_path)
+    print("Rigth  Path    : %s" % g_right_path)
+    print("Out    Path    : %s" % g_out_path)
 
-    left_label_info  = get_attribute(g_left_label)
-    right_label_info = get_attribute(g_right_label)
+    g_target_path = g_target_path.replace('\\', '/')
+    print("Target Path    : %s" % g_target_path)
+
+    left_label_info  = get_attribute(g_left_label, g_target_path)
+    right_label_info = get_attribute(g_right_label, g_target_path)
 
     left_out_path = g_out_path + "\\01_before\\" + os.path.dirname(left_label_info.file_name)
 
@@ -204,8 +218,8 @@ def get_diff_mode():
     else:
         right_out_path = g_out_path + "\\" + os.path.dirname(left_label_info.file_name)
 
-#   print("Left  Out Path  : %s" % left_out_path)
-#   print("Right Out Path  : %s" % right_out_path)
+    print("Left  Out Path : %s" % left_out_path)
+    print("Right Out Path : %s" % right_out_path)
     if (g_right_only == 0):
         make_directory(left_out_path)
         if (left_label_info.revision != -1):
@@ -221,26 +235,42 @@ def get_diff_mode():
 #/*****************************************************************************/
 #/* ラベル情報からファイル名とRevision情報を取得                              */
 #/*****************************************************************************/
-def get_attribute(label):
+def get_attribute(label, base_path):
     file_name = ""
     revision  = 0
 
-    print("get attribute from : " + label)
+#   print("get attribute from : " + label)
     if (result := re_nonexistent.match(label)):
-        print("nonexistent  : %s" % result.group(1))
+#       print("nonexistent    : %s" % result.group(1))
         file_name = result.group(1)
         revision  = -1
     elif (result := re_working_copy.match(label)):
-        print("working copy : %s" % result.group(1))
+#       print("working copy   : %s" % result.group(1))
         file_name = result.group(1)
         revision  = 0
     elif (result := re_revision.match(label)):
-        print("revision %s : %s" % (result.group(2), result.group(1)))
+#       print("revision       : %s,  %s" % (result.group(2), result.group(1)))
         file_name = result.group(1)
         revision  = int(result.group(2))
 
+    file_name = file_name.replace(base_path, '').removeprefix('/')
+    
     label_info = cLabelInfo(file_name, revision)
     return label_info
+
+
+#/*****************************************************************************/
+#/* タイムスタンプオプション処理                                              */
+#/*****************************************************************************/
+def set_time_stamp(out_path):
+    global g_out_timestamp
+
+    if (g_out_timestamp != ""):
+        out_path = out_path + '_' + g_out_timestamp
+    else:
+        out_path = out_path
+
+    return out_path
 
 
 #/*****************************************************************************/
@@ -250,27 +280,21 @@ def set_output_path(target_path):
     global g_out_path
 
     if (g_out_path != ""):
-        if (g_out_timestamp != ""):
-            out_path = g_out_path + '_' + g_out_timestamp
-        else:
-            out_path = g_out_path
+        out_path = set_time_stamp(g_out_path)
+    elif (os.path.isdir(target_path)):
+        #/* パス指定された場合は、同一階層に出力する */
+        out_path = set_time_stamp(os.path.dirname(target_path) + '\\diff_export')
     else:
         g_out_path = 'diff_export'
         this_path = os.getcwd()
 
-        if (g_out_timestamp != ""):
-            out_path = this_path + '\\' + g_out_path + '_' + g_out_timestamp
-        else:
-            out_path = this_path + '\\' + g_out_path
+        out_path = set_time_stamp(this_path + '\\' + g_out_path)
 
         #/* WorkingCopyの差分抽出の場合、.svnフォルダを探索する */
         if (target_path == ""):
             while(this_path != ""):
-                if (os.path.isdir(this_path + '\.svn')):
-                    if (g_out_timestamp != ""):
-                        out_path = os.path.dirname(this_path) + '\\' + g_out_path + '_' + g_out_timestamp
-                    else:
-                        out_path = os.path.dirname(this_path) + '\\' + g_out_path
+                if (os.path.isdir(this_path + r'\.svn')):
+                    out_path = set_time_stamp(os.path.dirname(this_path) + '\\' + g_out_path)
 
                     print("found .svn in %s to %s" % (this_path, out_path))
                     break
@@ -300,20 +324,28 @@ def main():
         #/* --diff-cmdとして呼ばれた際の動作 */
         get_diff_mode()
     else:
+        #/* 通常の呼び出し */
         out_path = set_output_path(g_target_path)
-        temp_cmd = create_temp_cmd_file(out_path)
 
         if (g_target_path == ""):
+            create_temp_cmd_file(out_path, '')
             cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name
+        elif (os.path.isdir(g_target_path)):
+            create_temp_cmd_file(out_path, g_target_path)
+            cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name + ' ' + g_target_path
         else:
+            create_temp_cmd_file(out_path, '')
             cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name + ' -r ' + str(g_revision1) + ':' + str(g_revision2) + ' ' + g_target_path
 
+
+        #/* svn diffコマンドを実行し、svn側からg_temp_cmd_nameに作成したbatファイルを実行してもらう */
         print(cmd_text)
         lines = cmd_execute(cmd_text, "", "")
         print(lines)
 
         #/* 一時ファイルを削除 */
         os.remove(g_temp_cmd_name)
+#       input('Hit Enter!')
 
     return
 
