@@ -24,6 +24,7 @@ g_out_timestamp      = ""
 g_out_path           = ""
 g_right_only         = 0
 g_report_by_winmerge = 0                       #/* WinMergeによる差分レポートの生成（exeにPATHを通しておくこと！） */
+g_opt_force          = 1
 
 re_nonexistent  = re.compile(r"^(.+)\s+\(nonexistent\)$")
 re_working_copy = re.compile(r"^(.+)\s+\(working copy\)$")
@@ -57,6 +58,7 @@ def check_command_line_option():
     global g_right_only
     global g_opt_ts
     global g_report_by_winmerge
+    global g_opt_force
 
     argc = len(sys.argv)
     option = ""
@@ -86,6 +88,8 @@ def check_command_line_option():
             option = "r"
         elif (arg == "-o") or (arg == "--outpath"):
             option = "o"
+        elif (arg == "-nf") or (arg == "--no_force"):
+            g_opt_force = 0
         elif (arg == "-wmr") or (arg == "--report_by_winmerge"):
             g_report_by_winmerge = 1
             count += 1
@@ -345,6 +349,7 @@ def main():
     global g_revision2
     global g_diff_mode
     global g_temp_cmd_name
+    global g_opt_force
 
     check_command_line_option()
     if (g_diff_mode):
@@ -354,15 +359,20 @@ def main():
         #/* 通常の呼び出し */
         out_path = set_output_path(g_target_path)
 
+        if (g_opt_force == 0):
+            cmd_text = 'svn diff --diff-cmd '
+        else:
+            cmd_text = 'svn diff --force --diff-cmd '
+
         if (g_target_path == ""):
             create_temp_cmd_file(out_path, '')
-            cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name
+            cmd_text = cmd_text + g_temp_cmd_name
         elif (os.path.isdir(g_target_path)):
             create_temp_cmd_file(out_path, g_target_path)
-            cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name + ' ' + g_target_path
+            cmd_text = cmd_text + g_temp_cmd_name + ' ' + g_target_path
         else:
             create_temp_cmd_file(out_path, '')
-            cmd_text = 'svn diff --diff-cmd ' + g_temp_cmd_name + ' -r ' + str(g_revision1) + ':' + str(g_revision2) + ' ' + g_target_path
+            cmd_text = cmd_text + g_temp_cmd_name + ' -r ' + str(g_revision1) + ':' + str(g_revision2) + ' ' + g_target_path
 
 
         #/* svn diffコマンドを実行し、svn側からg_temp_cmd_nameに作成したbatファイルを実行してもらう */
