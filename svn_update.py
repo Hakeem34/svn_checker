@@ -70,7 +70,7 @@ def delete_removed_files(target_dir, update_path):
     else:
         print("🔹 削除するファイルはありません。")
 
-def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False):
+def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False, quiet=False):
     """ SVNリポジトリを更新し、コミットしてタグを作成する """
     if not os.path.exists(target_dir):
         print(f"エラー: 指定されたリポジトリディレクトリが存在しません -> {target_dir}")
@@ -95,31 +95,53 @@ def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False):
         print("🔍 Dry-runモード: コミットおよびタグ作成はスキップします。")
         return
 
+    commit_message = f"Auto-commit from {update_path}  at  {datetime.datetime.now()}"
+    while (quiet == False):
+        input_msg = input(f'コミットメッセージを入力してください : ')
+        if (input_msg == ''):
+            input_msg = commit_message
+
+        if tag_url:
+            input_key = input(f'{input_msg} のメッセージでコミットし、\n{tag_url} のTAGを作成します。\n宜しいですか？ (Yes / No / Cancel)')
+        else:
+            input_key = input(f'{input_msg} のメッセージでコミットして宜しいですか？ (Yes / No / Cancel)')
+
+        if (input_key.upper() == 'C') or (input_key.upper() == 'CANCEL'): 
+            print("コミットをキャンセルしました")
+            return
+        elif (input_key.upper() == 'Y') or (input_key.upper() == 'YES'): 
+            commit_message = input_msg
+            quiet = True
+
     print("▶ SVNの変更をコミット")
-    commit_message = f"Auto-commit at {datetime.datetime.now()}"
+
     execute_svn_command(["svn", "commit", "-m", commit_message], cwd=target_dir)
 
     if tag_url:
         print(f"▶ SVNのタグを作成: {tag_url}")
-        execute_svn_command(["svn", "copy", target_dir, tag_url, "-m", f"Tagging version at {datetime.datetime.now()}"])
+        execute_svn_command(["svn", "copy", target_dir, tag_url, "-m", commit_message])
 
     print("✅ SVNアップデート & コミット完了")
+    return
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3 or len(sys.argv) > 5:
-        print("使い方: svn_update.py [target(checkouted) directory] [update code path] [tag url (省略可)] [--dryrun (省略可)]")
+    if len(sys.argv) < 3 or len(sys.argv) > 6:
+        print("使い方: svn_update.py [target(checkouted) directory] [update code path] [tag url (省略可)] [--dryrun (省略可)] [--quiet (省略可)]")
         sys.exit(1)
 
     target_directory = sys.argv[1]
     update_code_path = sys.argv[2]
     tag_svn_url = None
     dryrun = False
+    quiet  = False
 
     # オプションの解析
     for arg in sys.argv[3:]:
         if arg.lower() == "--dryrun":
             dryrun = True
+        elif arg.lower() == "--quiet":
+            quiet = True
         else:
             tag_svn_url = arg  # --dryrun でなければ tag_url として扱う
 
-    svn_update_and_commit(target_directory, update_code_path, tag_svn_url, dryrun)
+    svn_update_and_commit(target_directory, update_code_path, tag_svn_url, dryrun, quiet)
