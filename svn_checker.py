@@ -31,8 +31,8 @@ g_except_paths      = set([])
 g_stop_on_copy      = 0
 g_full_path         = 0
 g_log_limit         = 0
-g_revision1         = ""
-g_revision2         = ""
+g_revision1         = 0
+g_revision2         = 0
 g_path1             = ""
 g_path_logs         = []
 g_repo_info         = None
@@ -531,15 +531,15 @@ def check_command_line_option():
 #/*****************************************************************************/
 #/* svnログ取得                                                               */
 #/*****************************************************************************/
-def check_log(target_path, revision, limit):
+def check_log(target_path, revision_start, revision_end, limit):
     global g_path_logs
     global g_repo_info
 
     cmd_text = r"svn log -v "
     option   = ""
 
-    if (revision != ""):
-        option += r"-r " + revision + " "
+    if (revision_start != 0) and (revision_end != 0):
+        option += r"-r " + str(revision_start) + ":" + str(revision_end) + " "
 
     if (limit != 0):
         option += r"-l " + str(limit) + " "
@@ -641,7 +641,7 @@ def check_path_log():
     global g_revision1
     global g_revision2
 
-    check_log(g_path1, g_revision1, g_log_limit)
+    check_log(g_path1, g_revision1, g_revision2, g_log_limit)
     return
 
 
