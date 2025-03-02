@@ -311,7 +311,8 @@ def set_output_path(target_path):
     global g_out_path
 
     if (g_out_path != ""):
-        out_path = set_time_stamp(g_out_path)
+#       out_path = set_time_stamp(g_out_path)
+        out_path = g_out_path
     elif (os.path.isdir(target_path)):
         #/* パス指定された場合は、同一階層に出力する */
         out_path = set_time_stamp(os.path.dirname(target_path) + '\\diff_export')

@@ -34,18 +34,19 @@ g_log_limit         = 0
 g_revision1         = ""
 g_revision2         = ""
 g_path1             = ""
-g_path2             = ""
 g_path_logs         = []
 g_repo_info         = None
 g_out_path          = "out"
 g_log_file_name     = ""
 g_default_log       = 1
 g_patch_mode        = 0
+g_diff_mode         = 0
 
 #/* かぞえチャオ関連 */
 g_kazoe_path        = r"..\kazoeciao"
 g_out_cas_file      = 1
 g_kazoe_only        = 0
+g_kazoe_exec        = 1
 g_out_xlsx_file     = ""
 g_kazoe_history     = None
 
@@ -436,14 +437,15 @@ def check_command_line_option():
     global g_revision1
     global g_revision2
     global g_path1
-    global g_path2
     global g_out_path
     global g_full_path
     global g_kazoe_only
+    global g_kazoe_exec
     global g_out_cas_file
     global g_kazoe_history
     global g_target_paths
     global g_except_paths
+    global g_diff_mode
 
     argc = len(sys.argv)
     option = ""
@@ -455,14 +457,15 @@ def check_command_line_option():
     sys.argv.pop(0)
     for arg in sys.argv:
         if (option == "r"):
-            if (g_revision1 == ""):
-                g_revision1 = arg
-            elif (g_revision2 == ""):
-                g_revision2 = arg
-            else:
-                print("svn_checker.py : Too many revisions!")
+            revisions = arg.split(':')
+            if (len(revisions) != 2):
+                print(f"Invalid Revision! {arg}")
                 exit(-1)
+
+            g_revision1 = int(revisions[0])
+            g_revision2 = int(revisions[1])
             option = ""
+#           print(f'  Revision {g_revision1} to {g_revision2}')
         elif (option == "l"):
             g_log_limit = int(arg)
 #           print("log limit %s" % g_log_limit)
@@ -485,26 +488,29 @@ def check_command_line_option():
             g_full_path = 1
         elif (arg == "-l") or (arg == "--limit"):
             option = "l"
-        elif (arg == "-r") or (arg == "--revision"):
+        elif (arg == "-r") or (arg == "--revision"):                     #/* リビジョン指定         */
             option = "r"
-        elif (arg == "-k") or (arg == "--kazoe"):
+        elif (arg == "-k") or (arg == "--kazoe"):                        #/* かぞえチャオのパス指定 */
             option = "k"
-        elif (arg == "-o"):
+        elif (arg == "-o"):                                              #/* 出力フォルダ指定       */
             option = "o"
-        elif (arg == "-e"):
+        elif (arg == "-e"):                                              #/* 除外パスの指定         */
             option = "e"
-        elif (arg == "-t"):
+        elif (arg == "-t"):                                              #/* ターゲットパス指定     */
             option = "t"
         elif (arg == "-ko"):
-            g_kazoe_only = 1
+            g_kazoe_only = 1                                             #/* かぞえチャオのみ実行         */
+        elif (arg == "--no_ko"):
+            g_kazoe_exec = 0                                             #/* かぞえチャオの実行スキップ   */
+        elif (arg == "--diff_only"):
+            g_diff_mode = 1
+            g_kazoe_exec = 0
         elif (g_path1 == ""):
             if (result := re.search(r"\/$", arg)):
 #               print("end by /")
                 g_path1 = arg[:-1]
             else:
                 g_path1 = arg
-        elif (g_path2 == ""):
-            g_path2 = arg
         else:
             print("svn_checker.py : Too many paths!")
             exit(-1)
@@ -631,16 +637,11 @@ def check_log(target_path, revision, limit):
 #/*****************************************************************************/
 def check_path_log():
     global g_path1
-    global g_path2
     global g_log_limit
     global g_revision1
     global g_revision2
 
-    if (g_path2 == ""):
-        check_log(g_path1, g_revision1, g_log_limit)
-    else:
-        check_log(g_path1)
-
+    check_log(g_path1, g_revision1, g_log_limit)
     return
 
 
@@ -847,6 +848,23 @@ def output_cas_text(commit_log, pre_revision, target_path, before, after):
 
 
 #/*****************************************************************************/
+#/* ログに出てくるコミットのdiffをすべてexportする
+#/*****************************************************************************/
+def output_diff_files(path_log, commit_log, pre_revision):
+    rev_path = g_out_path + "/diff_r" + str(pre_revision) + '_r' + str(commit_log.revision)
+    print("output_diff_files for rev:%d, pre_rev: %d" % (commit_log.revision, pre_revision))
+    if (pre_revision != 0):
+        make_directory(rev_path)
+        diff_ex_cmd = 'python svn_diff_ex.py -o ' + rev_path + ' -r ' + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
+        print(diff_ex_cmd)
+        lines = cmd_execute(diff_ex_cmd, "", "")
+
+        #/* コミットログの内容をテキストファイルに出力 */
+        commit_log.output_log_text(rev_path)
+    return
+
+
+#/*****************************************************************************/
 #/* ログ内のターゲットファイル出力                                            */
 #/*****************************************************************************/
 def output_log_files(path_log, commit_log, pre_revision):
@@ -882,26 +900,13 @@ def output_log_files(path_log, commit_log, pre_revision):
     else:
         #/* 2回目以降のRevisionに対しては、svn diffによるPatchを取得して、Patchを当てていくことで高速化する */
         force_copy_directory(pre_path, rev_path)
-#       diff_ex_cmd = 'python svn_diff_ex.py -o ' + export_path + ' -ro -r ' + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
         diff_ex_cmd = 'python svn_diff_ex.py -o ' + export_path + ' -ro -r ' + str(commit_log.revision - 1) + ":" + str(commit_log.revision) + " " + g_repo_info.url
         print(diff_ex_cmd)
         lines = cmd_execute(diff_ex_cmd, "", "")
 
-#       out_diff = out_path + "/diff_from_r" + str(pre_revision) + ".diff"
-#       diff_cmd = "svn diff -r " + str(pre_revision) + ":" + str(commit_log.revision) + " " + g_repo_info.url
-#       print(diff_cmd)
-#       lines = cmd_execute(diff_cmd, out_diff, "")
-#       print(lines)
-#       if (g_full_path):
-#           patch_cmd = "patch -d " + export_path + g_repo_info.relative_dir + " -p0"
-#       else:
-#           patch_cmd = "patch -d " + export_path + " -p0"
-#       print(patch_cmd)
-#       lines = cmd_execute(patch_cmd, "", out_diff)
-#       os.remove(out_diff)
-
     #/* かぞえチャオ自動実行 */
-    output_cas_text(commit_log, pre_revision, rev_path, pre_path + "/export", export_path)
+    if (g_kazoe_exec == 1):
+        output_cas_text(commit_log, pre_revision, rev_path, pre_path + "/export", export_path)
 
     #/* コミットログの内容をテキストファイルに出力 */
     commit_log.output_log_text(rev_path)
@@ -917,6 +922,7 @@ def output_path_files():
     global g_out_path
     global g_full_path
     global g_patch_mode
+    global g_diff_mode
 
     pre_revision = 0
     make_directory(g_out_path)
@@ -931,19 +937,22 @@ def output_path_files():
             for changed in log.changes:
                 if (changed.external == 1):
                     #/* 外部のファイルが含まれていたらPatchモード不可 */
-                    print("disable patch mode1! for Rev.%d" % log.revision)
+#                   print("disable patch mode1! for Rev.%d" % log.revision)
                     g_patch_mode = 0
                 elif (is_path_in_target(changed.path)):
                     #/* ターゲットのファイルが一つでもあれば、出力する */
-                    print("exec output log! for Rev.%d" % log.revision)
+#                   print("exec output log! for Rev.%d" % log.revision)
                     exec = 1
                 else:
                     #/* 対象外のファイルが含まれていたらPatchモード不可 */
-                    print("disable patch mode2! for Rev.%d" % log.revision)
+#                   print("disable patch mode2! for Rev.%d" % log.revision)
                     g_patch_mode = 0
 
             if (exec):
-                output_log_files(path_log, log, pre_revision)
+                if (g_diff_mode == 1):
+                    output_diff_files(path_log, log, pre_revision)
+                else:
+                    output_log_files(path_log, log, pre_revision)
                 pre_revision = log.revision
 
     return
