@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import datetime
+import re
 
 def execute_svn_command(command, cwd=None):
     """ SVNコマンドを実行し、結果を取得する """
@@ -13,6 +14,18 @@ def execute_svn_command(command, cwd=None):
     except subprocess.CalledProcessError as e:
         print(f"エラー: コマンド実行失敗 -> {e.stderr}")
         sys.exit(1)
+
+def check_remote_url(target_dir):
+    print("▶ SVNリポジトリURLを確認中...")
+    info_output = execute_svn_command(["svn", "info"], cwd=target_dir).split('\n')
+#   print(info_output)
+    for line in info_output:
+#       print(line)
+        if (result := re.match(r'^URL: (.+)$', line)):
+            print(f'URL : {result.group(1)}')
+            return result.group(1)
+
+    return ''
 
 def check_svn_status(target_dir):
     """ SVNの変更状態をチェックし、未コミットの変更があれば処理を中止 """
@@ -79,6 +92,9 @@ def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False, q
     # SVNステータスをチェック（変更があれば処理中止）
     check_svn_status(target_dir)
 
+    # SVNリポジトリURLをチェック
+    remote_url = check_remote_url(target_dir)
+
     # SVNリポジトリを最新状態に更新
     update_svn_to_latest(target_dir)
 
@@ -119,7 +135,7 @@ def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False, q
 
     if tag_url:
         print(f"▶ SVNのタグを作成: {tag_url}")
-        execute_svn_command(["svn", "copy", target_dir, tag_url, "-m", commit_message])
+        execute_svn_command(["svn", "copy", remote_url, tag_url, "-m", commit_message])
 
     print("✅ SVNアップデート & コミット完了")
     return
