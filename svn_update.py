@@ -5,6 +5,8 @@ import sys
 import datetime
 import re
 
+RE_SVN_DIR = re.compile(r'(\\)*\.svn(\\)*')
+
 def execute_svn_command(command, cwd=None):
     """ SVNコマンドを実行し、結果を取得する """
     try:
@@ -51,6 +53,10 @@ def copy_files(src, dest):
         sys.exit(1)
     
     for root, dirs, files in os.walk(src):
+        if (result := RE_SVN_DIR.search(root)):
+            print(f'skip .svn dir! {root}')
+            continue
+
         rel_path = os.path.relpath(root, src)
         dest_path = os.path.join(dest, rel_path)
 
@@ -66,6 +72,10 @@ def delete_removed_files(target_dir, update_path):
     update_files = set()
 
     for root, _, files in os.walk(target_dir):
+        if (result := RE_SVN_DIR.search(root)):
+            print(f'skip .svn dir! {root}')
+            continue
+
         for file in files:
             target_files.add(os.path.relpath(os.path.join(root, file), target_dir))
 
