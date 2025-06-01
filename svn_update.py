@@ -272,7 +272,7 @@ def execute_commit_and_tag(target_dir, remote_url, update_path, tag_url, quiet):
     now = datetime.datetime.now()
     formatted_time = now.strftime("%Y%m%d_%H%M%S")
     tmp_file = os.path.abspath("~svn_update_commit_" + formatted_time + ".txt")
-    tmp_commit_message = open(tmp_file, "w", encoding="utf-8")
+    tmp_commit_message = open(tmp_file, "w", newline="\n")
     print(commit_message, file=tmp_commit_message)
     tmp_commit_message.close()
 
