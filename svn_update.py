@@ -1,5 +1,6 @@
 import subprocess
 import os
+import stat
 import shutil
 import sys
 import datetime
@@ -179,7 +180,11 @@ def copy_files(src, dest):
         os.makedirs(dest_path, exist_ok=True)
 
         for file in files:
-            shutil.copy2(os.path.join(root, file), os.path.join(dest_path, file))
+            target_file = os.path.join(dest_path, file)
+            if (os.path.isfile(target_file) and not os.access(target_file, os.W_OK)):
+                os.chmod(target_file, mode=stat.S_IWRITE)
+
+            shutil.copy2(os.path.join(root, file), target_file)
 
 
 #--------------------------------------------------------------------------------------------------
@@ -244,7 +249,7 @@ def delete_removed_files(target_dir, update_path):
 #--------------------------------------------------------------------------------------------------
 def add_new_files(target_dir):
     print_log("▶ SVNの変更を追加")
-    execute_svn_command(["svn", "add", "--force", "."], cwd=target_dir)
+    execute_svn_command(["svn", "add", "--force", "--no-ignore", "."], cwd=target_dir)
 
 
 #--------------------------------------------------------------------------------------------------
