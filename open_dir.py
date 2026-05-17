@@ -4,6 +4,15 @@ import subprocess
 import sys
 
 
+def get_app_path():
+    if getattr(sys, 'frozen', False):
+        # EXEとして実行されている場合
+        return os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        # 通常のPythonスクリプトとして実行されている場合
+        return os.path.dirname(os.path.abspath(__file__))
+
+
 def open_folder_and_cmd(target_path):
     # 絶対パスに変換
     abs_path = os.path.abspath(target_path)
@@ -41,8 +50,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "path",
         nargs="?",
-        default=".",
-        help="開きたいフォルダのパス (省略時はカレントディレクトリ)",
+        default=get_app_path(),
+        help="開きたいフォルダのパス (省略時はこのファイルのパス)",
     )
 
     args = parser.parse_args()
