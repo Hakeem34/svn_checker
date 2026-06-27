@@ -188,6 +188,67 @@ def copy_files(src, dest):
 
 
 #--------------------------------------------------------------------------------------------------
+# Windows上で同じ小文字パスだが大文字小文字が異なるファイルを svn mv で更新
+#--------------------------------------------------------------------------------------------------
+def rename_case_only_files(target_dir, update_path):
+    print_log("▶ case-only 変更のファイル名を確認中...")
+
+    def build_file_map(root_dir):
+        file_map = {}
+        for root, dirs, files in os.walk(root_dir):
+            if (is_include_key_folder(root, '.svn')):
+                continue
+
+            rel_root = os.path.relpath(root, root_dir)
+            if rel_root == '.':
+                rel_root = ''
+
+            for name in files:
+                if name == '.svn':
+                    continue
+
+                rel_path = os.path.join(rel_root, name) if rel_root else name
+                key = rel_path.replace('\\', '/').lower()
+                file_map[key] = rel_path
+
+        return file_map
+
+    target_files = build_file_map(target_dir)
+    update_files = build_file_map(update_path)
+
+    rename_candidates = []
+    for key, target_rel in target_files.items():
+        update_rel = update_files.get(key)
+        if update_rel and (target_rel != update_rel):
+            rename_candidates.append((target_rel, update_rel))
+
+    if not rename_candidates:
+        print_log("    case-only rename 対象のファイルはありません。")
+        return
+
+    for target_rel, update_rel in rename_candidates:
+        if target_rel == update_rel:
+            continue
+
+        source_rel = target_rel.replace('\\', '/')
+        dest_rel = update_rel.replace('\\', '/')
+
+        if os.path.normcase(source_rel) == os.path.normcase(dest_rel):
+            tmp_rel = source_rel + ".svn_case_change_tmp"
+            tmp_abs = os.path.join(target_dir, tmp_rel)
+            while os.path.exists(tmp_abs):
+                tmp_rel += "_"
+                tmp_abs = os.path.join(target_dir, tmp_rel)
+
+            print_log(f"    ▶ case-only rename: {source_rel} → {dest_rel}")
+            execute_svn_command(["svn", "mv", source_rel, tmp_rel], cwd=target_dir)
+            execute_svn_command(["svn", "mv", tmp_rel, dest_rel], cwd=target_dir)
+        else:
+            print_log(f"    ▶ rename: {source_rel} → {dest_rel}")
+            execute_svn_command(["svn", "mv", source_rel, dest_rel], cwd=target_dir)
+
+
+#--------------------------------------------------------------------------------------------------
 # update_path に存在しないファイルを SVN から削除する
 #--------------------------------------------------------------------------------------------------
 def delete_removed_files(target_dir, update_path):
@@ -311,6 +372,9 @@ def svn_update_and_commit(target_dir, update_path, tag_url=None, dryrun=False, q
 
     # SVNリポジトリを最新状態に更新
     update_svn_to_latest(target_dir)
+
+    # case-only 変更を先に SVN でリネームしておく
+    rename_case_only_files(target_dir, update_path)
 
     # ファイルをコピー
     copy_files(update_path, target_dir)
